@@ -1,0 +1,11 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# 真实密钥（绝不入库）
+.env
+
+# 系统
+.DS_Store

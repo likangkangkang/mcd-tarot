@@ -1,0 +1,180 @@
+"""麦麦塔罗牌 · 麦当劳 MCP 客户端（仅标准库，无第三方依赖）。
+
+仅用 urllib 实现 Streamable HTTP 版 MCP 的最小子集：
+  initialize -> tools/call(query-meals)
+真实可用菜单以用户麦当劳账号实时返回为准。
+
+设计原则
+--------
+1. 真实优先：提供 MCD_MCP_TOKEN 时，直连 mcd-mcp 拉真实菜单（含名称/价格）。
+2. 永远可演示：无 Token / 网络失败 / 解析异常时，自动回退到内置静态菜单，
+   保证 Skill 在任何环境下都能产出完整的塔罗解读。
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import urllib.error
+import urllib.request
+from typing import Any, Dict, List, Optional
+
+MCD_MCP_URL = "https://mcp.mcd.cn"
+CLIENT_INFO = {"name": "mcd-tarot", "version": "1.0.0"}
+PROTOCOL_VERSION = "2024-11-05"
+
+# 内置静态菜单（回退用，价格仅供参考，非实时）
+FALLBACK_MENU: List[Dict[str, Any]] = [
+    {"name": "巨无霸", "code": "9900000001", "price": 24.0, "category": "汉堡"},
+    {"name": "双层吉士堡", "code": "9900000002", "price": 22.5, "category": "汉堡"},
+    {"name": "麦辣鸡腿堡", "code": "9900005456", "price": 21.0, "category": "辣味炸鸡"},
+    {"name": "板烧鸡腿堡", "code": "9900000003", "price": 22.0, "category": "汉堡"},
+    {"name": "麦香鸡", "code": "9900000004", "price": 14.0, "category": "汉堡"},
+    {"name": "麦辣鸡翅(2块)", "code": "9900000005", "price": 13.0, "category": "辣味炸鸡"},
+    {"name": "劲脆鸡腿堡", "code": "9900000006", "price": 21.0, "category": "炸鸡"},
+    {"name": "薯条(中)", "code": "9900000007", "price": 12.0, "category": "主食配餐"},
+    {"name": "玉米杯", "code": "9900000008", "price": 9.0, "category": "清爽轻盈"},
+    {"name": "苹果片", "code": "9900000009", "price": 7.0, "category": "清爽轻盈"},
+    {"name": "鲜煮咖啡", "code": "9900000010", "price": 12.0, "category": "饮品甜饮"},
+    {"name": "美式咖啡(中)", "code": "9900000011", "price": 14.0, "category": "饮品甜饮"},
+    {"name": "拿铁(中)", "code": "9900000012", "price": 18.0, "category": "饮品甜饮"},
+    {"name": "可乐(中)", "code": "9900000013", "price": 10.0, "category": "饮品甜饮"},
+    {"name": "红豆派", "code": "9900000014", "price": 7.0, "category": "饮品甜饮"},
+    {"name": "麦旋风", "code": "9900000015", "price": 13.0, "category": "饮品甜饮"},
+    {"name": "甜筒", "code": "9900000016", "price": 5.0, "category": "饮品甜饮"},
+    {"name": "早餐全餐", "code": "9900000017", "price": 22.0, "category": "早餐"},
+    {"name": "开心乐园餐", "code": "9900000018", "price": 35.0, "category": "分享"},
+    {"name": "麦辣鸡翅分享盒", "code": "9900000019", "price": 39.0, "category": "辣味炸鸡"},
+]
+
+
+def _parse_body(body: str) -> Any:
+    """解析 JSON-RPC 响应：支持纯 JSON 与 SSE(text/event-stream)。"""
+    body = (body or "").strip()
+    if not body:
+        return None
+    if body.startswith("{"):
+        return json.loads(body)
+    # SSE: 取最后一个 data: 行
+    last = None
+    for line in body.splitlines():
+        line = line.strip()
+        if line.startswith("data:"):
+            data = line[5:].strip()
+            if data and data != "[DONE]":
+                last = data
+    if last:
+        try:
+            return json.loads(last)
+        except json.JSONDecodeError:
+            return None
+    return None
+
+
+def _post(token: str, payload: Dict[str, Any], session_id: Optional[str] = None):
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(MCD_MCP_URL, data=data, method="POST")
+    req.add_header("Authorization", f"Bearer {token}")
+    req.add_header("Content-Type", "application/json")
+    req.add_header("Accept", "application/json, text/event-stream")
+    if session_id:
+        req.add_header("Mcp-Session-Id", session_id)
+    resp = urllib.request.urlopen(req, timeout=20)
+    body = resp.read().decode("utf-8")
+    new_sid = resp.headers.get("Mcp-Session-Id") or resp.headers.get("mcp-session-id")
+    return _parse_body(body), new_sid
+
+
+def _extract_meals(result: Any) -> List[Dict[str, Any]]:
+    """从 tools/call 结果里尽量抽出菜单列表。结构可能有多层，做防御式解析。"""
+    if not isinstance(result, dict):
+        return []
+    content = result.get("result", result).get("content", []) if isinstance(result.get("result"), dict) else []
+    texts: List[str] = []
+    for item in content:
+        if isinstance(item, dict) and item.get("type") == "text":
+            texts.append(item.get("text", ""))
+    if not texts:
+        return []
+    blob = "\n".join(texts)
+    # 可能是 JSON 字符串数组 / 对象
+    try:
+        parsed = json.loads(blob)
+    except json.JSONDecodeError:
+        return []
+    items: List[Any] = []
+    if isinstance(parsed, list):
+        items = parsed
+    elif isinstance(parsed, dict):
+        for key in ("items", "meals", "data", "list", "products"):
+            if isinstance(parsed.get(key), list):
+                items = parsed[key]
+                break
+        else:
+            items = [parsed]
+    out: List[Dict[str, Any]] = []
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        name = it.get("name") or it.get("productName") or it.get("title")
+        if not name:
+            continue
+        out.append({
+            "name": str(name),
+            "code": it.get("code") or it.get("productCode") or it.get("id"),
+            "price": it.get("price") or it.get("salePrice"),
+            "category": it.get("category") or it.get("categoryName"),
+        })
+    return out
+
+
+def fetch_real_menu(token: str, **kwargs: Any) -> List[Dict[str, Any]]:
+    """直连 mcd-mcp 拉真实菜单；任何异常都向上抛出（由调用方回退）。"""
+    init, sid = _post(token, {
+        "jsonrpc": "2.0", "id": 1, "method": "initialize",
+        "params": {"protocolVersion": PROTOCOL_VERSION, "capabilities": {},
+                   "clientInfo": CLIENT_INFO},
+    })
+    if not init or "result" not in init:
+        raise RuntimeError("MCP initialize 失败")
+    res, _ = _post(token, {
+        "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+        "params": {"name": "query-meals", "arguments": kwargs or {}},
+    }, session_id=sid)
+    meals = _extract_meals(res)
+    if not meals:
+        raise RuntimeError("MCP query-meals 未返回可识别菜单")
+    return meals
+
+
+def get_menu(token: Optional[str] = None) -> List[Dict[str, Any]]:
+    """对外统一入口：有 Token 且成功取真实菜单则用真实；否则回退静态菜单。"""
+    token = token or os.environ.get("MCD_MCP_TOKEN")
+    if token:
+        try:
+            real = fetch_real_menu(token)
+            if real:
+                return real
+        except Exception as exc:  # noqa: BLE001 - 真实失败则回退，不阻断
+            print(f"[warn] 真实菜单获取失败，使用静态回退菜单：{exc}")
+    return FALLBACK_MENU
+
+
+def resolve_item(card: Dict[str, Any], menu: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """根据牌的 mcd_keywords 在菜单里匹配真实单品；匹配不到用关键词兜底。"""
+    keywords = card.get("mcd_keywords") or []
+    for kw in keywords:
+        for item in menu:
+            name = str(item.get("name", ""))
+            if kw and kw in name:
+                return item
+    # 退而求其次：用首个关键词当名字，价格留空
+    fallback_name = keywords[0] if keywords else card.get("mcd_category", "麦麦餐品")
+    return {"name": fallback_name, "code": None, "price": None, "category": card.get("mcd_category")}
+
+
+if __name__ == "__main__":
+    token = os.environ.get("MCD_MCP_TOKEN")
+    menu = get_menu(token)
+    print(f"菜单条数: {len(menu)}（{'真实' if token else '静态回退'}）")
+    print("样例:", menu[0])
