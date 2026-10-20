@@ -33,8 +33,8 @@ from typing import Dict, Optional
 CACHE_DIR = Path(os.environ.get("MCD_TAROT_CACHE", Path.home() / ".cache" / "mcd-tarot"))
 ONBOARDED_PATH = CACHE_DIR / "onboarded.json"
 
-GREETING = """你好，我是 **麦麦塔罗牌** 🃏🍔 —— 把麦当劳菜单摊成一副塔罗牌，每天替你抽一张，告诉今天该吃哪一道，顺手叠好能用的券；看中回一句「就它」，剩下的我来跑，付款你自己来。
-要现在翻开你的 **今日运势** 吗？回「**是**」我就抽，「**否**」我就不打扰。"""
+GREETING = """我是 **麦麦塔罗牌** 🃏 —— 每天抽一张，替你决定今天吃什么。
+要开你的 **今日运势** 吗？回「**是**」或「**否**」。"""
 
 REPLY_YES = "好，牌已经洗好了——这就翻开你的今日运势。"
 REPLY_NO = "好，那我先收起牌。想吃的时候随时叫我，我在。"
