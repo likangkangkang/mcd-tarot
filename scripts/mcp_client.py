@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import urllib.error
 import urllib.request
 from typing import Any, Dict, List, Optional
@@ -26,8 +27,8 @@ PROTOCOL_VERSION = "2024-11-05"
 # 内置静态菜单（回退用，价格仅供参考，非实时）
 FALLBACK_MENU: List[Dict[str, Any]] = [
     {"name": "巨无霸", "code": "9900000001", "price": 24.0, "category": "汉堡"},
-    {"name": "双层吉士堡", "code": "9900000002", "price": 22.5, "category": "汉堡"},
-    {"name": "麦辣鸡腿堡", "code": "9900005456", "price": 21.0, "category": "辣味炸鸡"},
+    {"name": "双层吉士汉堡", "code": "9900000002", "price": 22.5, "category": "汉堡"},
+    {"name": "麦辣鸡腿汉堡", "code": "9900005456", "price": 21.0, "category": "辣味炸鸡"},
     {"name": "板烧鸡腿堡", "code": "9900000003", "price": 22.0, "category": "汉堡"},
     {"name": "麦香鸡", "code": "9900000004", "price": 14.0, "category": "汉堡"},
     {"name": "麦辣鸡翅(2块)", "code": "9900000005", "price": 13.0, "category": "辣味炸鸡"},
@@ -45,6 +46,12 @@ FALLBACK_MENU: List[Dict[str, Any]] = [
     {"name": "早餐全餐", "code": "9900000017", "price": 22.0, "category": "早餐"},
     {"name": "开心乐园餐", "code": "9900000018", "price": 35.0, "category": "分享"},
     {"name": "麦辣鸡翅分享盒", "code": "9900000019", "price": 39.0, "category": "辣味炸鸡"},
+    {"name": "灰焰圆筒", "code": "9900000020", "price": 5.0, "category": "饮品甜饮"},
+    {"name": "人气经典随心配", "code": "9900000021", "price": 14.9, "category": "随心配"},
+    {"name": "限定风味麦旋风", "code": "9900000022", "price": 16.0, "category": "饮品甜饮"},
+    {"name": "燕麦奶铁", "code": "9900000023", "price": 9.9, "category": "饮品甜饮"},
+    {"name": "薄皮V翅双拼十翅", "code": "9900000024", "price": 49.9, "category": "辣味炸鸡"},
+    {"name": "全明星双人分享餐", "code": "9900000025", "price": 49.9, "category": "分享"},
 ]
 
 
@@ -160,16 +167,87 @@ def get_menu(token: Optional[str] = None) -> List[Dict[str, Any]]:
     return FALLBACK_MENU
 
 
-def resolve_item(card: Dict[str, Any], menu: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """根据牌的 mcd_keywords 在菜单里匹配真实单品；匹配不到用关键词兜底。"""
+# 非餐品（周边 / 贴纸 / 酱料）不参与映射，避免「薯条」命中「薯条脆卜卜毛绒周边」
+NON_FOOD_PATTERN = re.compile(r"周边|贴纸|毛绒|捶|痒挠|贴$|酱$")
+# 套餐类：单品的语义更准，只有在没有单品可选、或牌的关键词本身就指向套餐时才用
+BUNDLE_PATTERN = re.compile(r"套餐|三件套|双人|全家桶|组合|桶")
+
+
+def _pick_diverse(card: Dict[str, Any], menu: List[Dict[str, Any]], exclude: set) -> Optional[Dict[str, Any]]:
+    """关键词都被占用的兜底：在同品类里换一道没用过的、便宜的、名字短的。
+
+    只接受同品类（饮食语义一致），宁可重样也不硬塞一道不相干的菜。
+    """
+    cat = str(card.get("mcd_category") or "")
+    if not cat:
+        return None
+    pool = [
+        it for it in menu
+        if it.get("name") and not NON_FOOD_PATTERN.search(str(it["name"]))
+        and str(it["name"]) not in exclude
+    ]
+    same_cat = [
+        it for it in pool
+        if cat in str(it.get("category") or "") or str(it.get("category") or "") in cat
+    ]
+    if not same_cat:
+        return None
+    return min(same_cat, key=lambda it: (float(it.get("price") or 999), len(str(it["name"]))))
+
+
+def resolve_item(
+    card: Dict[str, Any],
+    menu: List[Dict[str, Any]],
+    exclude: Optional[set] = None,
+) -> Dict[str, Any]:
+    """根据牌的 mcd_keywords 在菜单里匹配真实单品；匹配不到用关键词兜底。
+
+    同一关键词内按「同名 > 单品优先 > 名称最短」择优：
+    - 同名优先，避免「巨无霸」被「巨无霸三件套」抢先；
+    - 单品优先于套餐，塔罗指引落到「一道真实的餐品」而不是一份组合；
+    - 非餐品（周边、贴纸、酱料）直接排除；
+    - exclude：已被本牌阵其它牌用掉的餐品名，先在同品类里换一道没用过的。
+    """
     keywords = card.get("mcd_keywords") or []
+    exclude = exclude or set()
+    candidates = [
+        it for it in menu
+        if it.get("name") and not NON_FOOD_PATTERN.search(str(it["name"]))
+    ]
+    backup: Optional[Dict[str, Any]] = None
+    bundle_backup: Optional[Dict[str, Any]] = None
     for kw in keywords:
-        for item in menu:
-            name = str(item.get("name", ""))
-            if kw and kw in name:
-                return item
+        if not kw:
+            continue
+        hits = [it for it in candidates if kw in str(it["name"])]
+        if not hits:
+            continue
+        fresh = [it for it in hits if str(it["name"]) not in exclude]
+        if not fresh:
+            backup = backup or hits[0]
+            continue
+        # 关键词本身指向套餐（如「全明星双人分享餐」）时不做单品优先
+        allow_bundle = bool(BUNDLE_PATTERN.search(kw))
+        singles = fresh if allow_bundle else [it for it in fresh if not BUNDLE_PATTERN.search(str(it["name"]))]
+        if not singles:
+            bundle_backup = bundle_backup or min(fresh, key=lambda it: len(str(it["name"])))
+            continue
+        for it in singles:
+            if str(it["name"]) == kw:
+                return it
+        return min(singles, key=lambda it: len(str(it["name"])))
+
+    # 关键词命中但都已被占用 → 同品类里换一道没用过的菜；没有就允许重样
+    diverse = _pick_diverse(card, menu, exclude)
+    if diverse:
+        return diverse
+    if bundle_backup:
+        return bundle_backup
+    if backup:
+        return backup
     # 退而求其次：用首个关键词当名字，价格留空
-    fallback_name = keywords[0] if keywords else card.get("mcd_category", "麦麦餐品")
+    fallback_name = next((k for k in keywords if k and k not in exclude), None)
+    fallback_name = fallback_name or (keywords[0] if keywords else card.get("mcd_category", "麦麦餐品"))
     return {"name": fallback_name, "code": None, "price": None, "category": card.get("mcd_category")}
 
 

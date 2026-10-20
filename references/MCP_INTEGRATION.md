@@ -41,3 +41,16 @@ mcp_client.get_menu(token)
 ## 5. 连接器配置（用户侧）
 见 `mcp-config.example.json`：在 WorkBuddy【连接器】→【自定义连接器】填入，并把
 `${MCD_MCP_TOKEN}` 替换为本人麦当劳 MCP Token，保存启用 `mcd-mcp` 即可。
+
+## 6. WorkBuddy 连接器路径（Skill 安装版）
+
+在 WorkBuddy 内运行时，Agent 不直接持有 Bearer Token，而是通过【连接器】`mcd-mcp`
+调用工具，再把结果喂给塔罗引擎：
+
+1. `query-nearby-stores`（beType=1；searchType=1 收藏门店 / searchType=2 按城市+关键词）→ 取 `storeCode`；
+2. `query-meals`（orderType=1, beType=1）→ 真实菜单原始返回；
+3. `scripts/menu_from_connector.py` 归一化为 `[{name, price, code, category}, ...]`；
+4. `scripts/tarot_engine.py --menu-file ...` 产出解读。
+
+任一步失败即回退内置示例菜单，保证体验不中断。`mcp_client.py` 的 Token 直连方式仍保留，
+供仓库/CI 环境复用（设置 `MCD_MCP_TOKEN` 环境变量）。

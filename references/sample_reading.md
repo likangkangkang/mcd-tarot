@@ -1,6 +1,6 @@
 # 示例解读 · 麦麦塔罗牌
 
-> 以下由 `python tarot_engine.py --spread trinity --mood "加班到很晚，有点丧"` 真实生成（未配 Token，使用内置示例菜单，故餐品价格为示例值；配置麦当劳 MCP Token 后将显示你账号可见的真实菜单与价格）。
+> 以下由 `python3 scripts/tarot_engine.py --spread trinity --mood "加班到很晚，有点丧"` 真实生成（未配 Token，使用内置示例菜单，故餐品价格为示例值；配置麦当劳 MCP Token 后将显示你账号可见的真实菜单与价格）。
 
 # 🔮 麦麦塔罗牌 · 身 · 心 · 灵 三餐
 
