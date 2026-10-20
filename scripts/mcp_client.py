@@ -171,6 +171,8 @@ def get_menu(token: Optional[str] = None) -> List[Dict[str, Any]]:
 NON_FOOD_PATTERN = re.compile(r"周边|贴纸|毛绒|捶|痒挠|贴$|酱$")
 # 套餐类：单品的语义更准，只有在没有单品可选、或牌的关键词本身就指向套餐时才用
 BUNDLE_PATTERN = re.compile(r"套餐|三件套|双人|全家桶|组合|桶")
+# 「自选组合」：随心配 / 1+1 / 任选，能装任意单品，是万能套餐兜底
+ANY_COMBO_PATTERN = re.compile(r"随心配|1\s*\+\s*1|任选|自选|自由搭")
 
 # 与 profile.py 的 TRAITS 对齐：用于「这个菜合不合你口味」
 _PREF_TRAITS: Dict[str, List[str]] = {
@@ -294,9 +296,38 @@ def _lcs_len(a: str, b: str) -> int:
     return best
 
 
+# 牌组的品类（profile 归纳的四类）↔ 门店菜单的真实分类（鸡肉汉堡/卷、饮品、麦咖啡…）
+# 两套命名并不通用，不做映射的话「同品类兜底」等于永远不命中。
+_CAT_ALIASES = {
+    "主食汉堡薯条": ("汉堡", "主食", "堡", "薯条", "卷"),
+    "辣味炸鸡": ("炸鸡", "鸡翅", "辣", "麦乐鸡", "小食"),
+    "饮品甜饮": ("饮品", "饮料", "咖啡", "可乐", "甜", "冰"),
+    "清爽轻盈": ("沙拉", "蔬果", "玉米", "轻"),
+}
+
+
+def cat_match(menu_cat: str, card_cat: str) -> bool:
+    """门店分类和牌组品类是不是同一类东西。"""
+    ma, ca = _norm(menu_cat or ""), _norm(card_cat or "")
+    if not ma or not ca:
+        return False
+    if ma in ca or ca in ma:
+        return True
+    for alias in _CAT_ALIASES.get(str(card_cat), ()):
+        if _norm(alias) in ma:
+            return True
+    return _lcs_len(ma, ca) >= 3
+
+
 def deal_for(item: Dict[str, Any], profile: Optional[Dict[str, Any]],
              period: Optional[Dict[str, str]] = None) -> Optional[Dict[str, Any]]:
-    """这道菜能用哪张券、大概省多少。只在真的更便宜时返回。"""
+    """这道菜能用哪张券、大概省多少。只在真的更便宜时返回。
+
+    三类券分别处理，核心是「套餐也能叠加优惠」：
+    - 满减券（满 30 减 5）：与菜品无关，只看金额，套餐最容易吃到 → 套餐首选
+    - 套餐券（三件套/组合/任选N/桶）：只对套餐生效
+    - 单品券（11.9 麦辣鸡腿堡）：**不**抵扣套餐，避免把单品价算到套餐头上
+    """
     if not profile:
         return None
     price = item.get("price")
@@ -305,28 +336,43 @@ def deal_for(item: Dict[str, Any], profile: Optional[Dict[str, Any]],
     except (TypeError, ValueError):
         p = None
     name = str(item.get("name") or "")
+    is_combo_item = _form(item) in ("combo", "share")
 
     best: Optional[Dict[str, Any]] = None
     for coupon in profile.get("coupons") or []:
-        if coupon.get("combo"):
-            continue  # 「任选 2 件」这类是组合券，单独提示，不按单品算
-        # 单品券不能抵扣套餐（“11.9 麦辣鸡腿堡”不适用于“麦辣鸡腿汉堡三件套”）
-        if _form(item) == "combo":
-            continue
-        if not _coupon_matches(coupon.get("core", ""), coupon.get("keywords") or [], name):
-            continue
         cprice = coupon.get("price")
-        saving = None
-        if coupon.get("bogo"):
-            if p is not None:
-                saving = round(p / 2, 1)
-        elif cprice is not None and p is not None:
-            if float(cprice) == 0:
-                saving = p
-            elif float(cprice) < p:
-                saving = round(p - float(cprice), 1)
-        elif cprice is not None and p is None:
-            saving = 0.0
+        threshold = coupon.get("threshold")
+        threshold_off = coupon.get("threshold_off")
+        saving: Optional[float] = None
+        kind = "item"
+
+        # ① 满减券：和菜名无关，只看这一单金额
+        if threshold is not None and threshold_off:
+            if p is None or p < float(threshold):
+                continue
+            saving = round(min(float(threshold_off), p), 1)
+            cprice = round(p - saving, 1)
+            kind = "threshold"
+        else:
+            # ②③ 菜品券：先看形态适用范围
+            if is_combo_item and not coupon.get("combo_scope"):
+                continue  # 单品券不能抵扣套餐（“11.9 麦辣鸡腿堡”不适用于“麦辣鸡腿汉堡三件套”）
+            if coupon.get("combo") and not is_combo_item:
+                continue  # 「任选 2 件」这类只作组合提示，不按单品算
+            if not _coupon_matches(coupon.get("core", ""), coupon.get("keywords") or [], name):
+                continue
+            if coupon.get("combo"):
+                kind = "combo"
+            if coupon.get("bogo"):
+                if p is not None:
+                    saving = round(p / 2, 1)
+            elif cprice is not None and p is not None:
+                if float(cprice) == 0:
+                    saving = p
+                elif float(cprice) < p:
+                    saving = round(p - float(cprice), 1)
+            elif cprice is not None and p is None:
+                saving = 0.0
         if saving is None or saving <= 0:
             continue
         cand = {
@@ -336,6 +382,7 @@ def deal_for(item: Dict[str, Any], profile: Optional[Dict[str, Any]],
             "saving": saving,
             "free": cprice == 0,
             "bogo": bool(coupon.get("bogo")),
+            "kind": kind,
         }
         if best is None or cand["saving"] > best["saving"]:
             best = cand
@@ -503,6 +550,21 @@ _FORM_FALLBACK = {
 }
 
 
+def discount_ratio(item: Dict[str, Any]) -> float:
+    """套餐自带的折扣力度（划线价 - 现价）/ 划线价，0 表示没折扣。"""
+    p, orig = item.get("price"), item.get("original_price")
+    try:
+        pf, of = float(p), float(orig)
+    except (TypeError, ValueError):
+        return 0.0
+    if pf <= 0 or of <= pf:
+        return 0.0
+    return (of - pf) / of
+
+
+_discount_ratio = discount_ratio
+
+
 def _pick_with_form(
     pool: List[Dict[str, Any]],
     prefer_form: Optional[str],
@@ -518,6 +580,8 @@ def _pick_with_form(
         deal = deal_for(it, profile, period)
         if deal:
             score += min(0.8, deal["saving"] / 10)
+        # 套餐自带的立减（划线价）也是优惠，折扣越深越优先
+        score += min(0.6, _discount_ratio(it) * 3)
         return (-score, len(str(it.get("name"))))
 
     if prefer_form:
@@ -528,6 +592,72 @@ def _pick_with_form(
                 return min(hits, key=rank)
     singles = [it for it in pool if _form(it) != "combo"]
     return min(singles or pool, key=rank)
+
+
+_COMBO_WORDS = ("套餐", "三件套", "组合", "双人", "桶", "超值", "分享")
+
+
+def combo_option(
+    card: Dict[str, Any],
+    menu: List[Dict[str, Any]],
+    exclude: Optional[set] = None,
+    profile: Optional[Dict[str, Any]] = None,
+    period: Optional[Dict[str, str]] = None,
+) -> Optional[Dict[str, Any]]:
+    """这张牌能不能落到套餐上：同关键词/同品类的套餐里，挑最划算的那份。
+
+    用于「默认多给套餐」——用户要的是吃得完整一点 + 优惠更实在，
+    但只在菜单里真有对应套餐时才升级，不会把薯条硬塞成全家桶。
+    """
+    exclude = exclude or set()
+    keywords = [k for k in (card.get("mcd_keywords") or []) if k]
+    cats = [str(card.get("mcd_category") or "")]
+
+    def _pick(pool: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        pool = [it for it in pool
+                if _form(it) in ("combo", "share")
+                and it.get("price") is not None]
+        if not pool:
+            return None
+        fresh = [it for it in pool if str(it.get("name")) not in exclude]
+        # 同阵里套餐都用完了也别落空：宁可重复一份，也好过把牌降级成单品
+        pool = fresh or pool
+        # 先看有没有券/折扣，再按「折扣力度 + 口味契合」择优
+        return min(pool, key=lambda it: (
+            -(min(0.8, (deal_for(it, profile, period) or {}).get("saving", 0) / 10)
+              + min(0.6, _discount_ratio(it) * 3)
+              + affinity(it, profile)["score"] * 0.5),
+            len(str(it.get("name"))),
+        ))
+
+    for kw in keywords:
+        hit = _pick([it for it in menu if kw in str(it.get("name"))])
+        if not hit:
+            # 近似匹配：「麦辣鸡腿汉堡」和「麦辣鸡腿堡套餐」只差一个字，
+            # 严格包含会漏掉一整批套餐
+            hit = _pick([it for it in menu
+                         if _lcs_len(_norm(kw), _norm(str(it.get("name")))) >= 4])
+        if hit:
+            return hit
+    for cat in cats:
+        if not cat:
+            continue
+        hit = _pick([it for it in menu
+                     if cat_match(str(it.get("category") or ""), cat)
+                     and BUNDLE_PATTERN.search(str(it.get("name")))])
+        if hit:
+            return hit
+    # 万能兜底：随心配 / 1+1 / 任选这类「自选组合」本身就能装任意单品，
+    # 哪张牌都能落进去，所以哪怕前面全没命中，也算「有套餐可给」
+    repeat: Optional[Dict[str, Any]] = None
+    for it in menu:
+        nm = str(it.get("name") or "")
+        if (_form(it) in ("combo", "share") and it.get("price") is not None
+                and ANY_COMBO_PATTERN.search(nm)):
+            if str(nm) not in exclude:
+                return it
+            repeat = repeat or it
+    return repeat
 
 
 def _resolve_core(
@@ -602,7 +732,7 @@ def _resolve_core(
     same_cat = [
         it for it in candidates
         if cat and str(it.get("category") or "")
-        and (cat in str(it["category"]) or str(it["category"]) in cat)
+        and cat_match(str(it["category"]), cat)
     ]
     pick = _pick_with_form(same_cat, prefer_form, profile, period) if same_cat else None
     if pick:
@@ -640,6 +770,23 @@ def _resolve_core(
             "original_price": None, "image": "", "form": prefer_form or "single", "_match": "none"}
 
 
+def finalize_item(
+    item: Dict[str, Any],
+    profile: Optional[Dict[str, Any]] = None,
+    period: Optional[Dict[str, str]] = None,
+    match: Optional[str] = None,
+) -> Dict[str, Any]:
+    """给一道已经选定的菜补上「口味契合 / 能用哪张券」的标注。"""
+    aff = affinity(item, profile)
+    out = dict(item)
+    out["affinity"] = aff["score"]
+    out["affinity_why"] = aff["why"]
+    out["deal"] = deal_for(out, profile, period)
+    if match:
+        out["_match"] = match
+    return out
+
+
 def resolve_item(
     card: Dict[str, Any],
     menu: List[Dict[str, Any]],
@@ -657,12 +804,7 @@ def resolve_item(
     - deal：可用的券与预计省下的钱（没有则 None）
     """
     item = _resolve_core(card, menu, exclude, prefer_form, profile, period)
-    aff = affinity(item, profile)
-    out = dict(item)
-    out["affinity"] = aff["score"]
-    out["affinity_why"] = aff["why"]
-    out["deal"] = deal_for(item, profile, period)
-    return out
+    return finalize_item(item, profile, period)
 
 
 if __name__ == "__main__":

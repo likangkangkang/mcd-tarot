@@ -308,23 +308,46 @@ def _coupon_from_title(title: str, price: Any, source: str) -> Dict[str, Any]:
 
     bogo = "买一送一" in title
     combo = any(w in title for w in _COUPON_COMBO)
+
+    # 满减券：「满 30 减 5」「满30元减5元」——套餐最容易吃到，必须单独识别
+    threshold: Optional[float] = None
+    threshold_off: Optional[float] = None
+    m = re.search(r"满\s*(\d+(?:\.\d+)?)\s*(?:元)?\s*减\s*(\d+(?:\.\d+)?)", title)
+    if m:
+        threshold = float(m.group(1))
+        threshold_off = float(m.group(2))
+    elif "满减" in title:
+        m2 = re.search(r"减\s*(\d+(?:\.\d+)?)", title)
+        m3 = re.search(r"满\s*(\d+(?:\.\d+)?)", title)
+        if m2:
+            threshold_off = float(m2.group(1))
+            threshold = float(m3.group(1)) if m3 else None
+
     if price is None:
-        m = re.search(r"(\d+(?:\.\d+)?)\s*元", title)
-        if m:
-            price = float(m.group(1))
-        elif "免费" in title or "0元" in title:
-            price = 0.0
+        if threshold_off is not None:
+            price = threshold_off      # 满减券的「价」就是减免额
+        else:
+            m = re.search(r"(\d+(?:\.\d+)?)\s*元", title)
+            if m:
+                price = float(m.group(1))
+            elif "免费" in title or "0元" in title:
+                price = 0.0
     try:
         price_f = float(price) if price is not None else None
     except (TypeError, ValueError):
         price_f = None
 
+    # 券的适用范围：能抵套餐的券（套餐名/三件套/任选N/桶），还是只抵单品
+    combo_scope = combo or any(w in title for w in ("套餐", "三件套", "组合", "桶", "双人"))
     return {
         "title": title,
         "core": core,
         "price": price_f,
         "bogo": bogo,
         "combo": combo,
+        "combo_scope": combo_scope,
+        "threshold": threshold,
+        "threshold_off": threshold_off,
         "source": source,          # wallet=已有券，claimable=可领
         "keywords": _coupon_keywords(core),
     }
@@ -377,12 +400,42 @@ def build(orders=None, wallet=None, available=None, account=None) -> Dict[str, A
     return prof
 
 
-def load_profile() -> Optional[Dict[str, Any]]:
+def profile_age_hours(prof: Optional[Dict[str, Any]] = None) -> Optional[float]:
+    """画像距现在多少小时；解析不出时间戳时返回 None（当作新鲜）。"""
+    prof = prof if prof is not None else load_profile()
+    if not prof:
+        return None
+    raw = str(prof.get("updated") or "")
+    for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+        try:
+            then = datetime.strptime(raw, fmt)
+            return max(0.0, (datetime.now() - then).total_seconds() / 3600.0)
+        except ValueError:
+            continue
+    return None
+
+
+def is_stale(max_age_hours: float = 6.0, prof: Optional[Dict[str, Any]] = None) -> bool:
+    """画像够不够旧：订单/券包变化不快，默认 6 小时内不再重新拉取，省掉 4 次往返。"""
+    age = profile_age_hours(prof)
+    return age is not None and age > max_age_hours
+
+
+def load_profile(max_age_hours: Optional[float] = None) -> Optional[Dict[str, Any]]:
+    """读本地画像。
+
+    max_age_hours 给出时，超过这个时长的画像视为过期并返回 None，
+    调用方据此决定「重新拉一次」还是「先用着」。不给则无条件返回。
+    """
     try:
         data = json.loads(PROFILE_PATH.read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) and data.get("favorites") else None
     except (OSError, json.JSONDecodeError):
         return None
+    if not isinstance(data, dict) or not data.get("favorites"):
+        return None
+    if max_age_hours is not None and is_stale(max_age_hours, data):
+        return None
+    return data
 
 
 def save_profile(prof: Dict[str, Any]) -> Path:

@@ -91,33 +91,62 @@ def period_of(now: Optional[datetime] = None) -> Dict[str, str]:
 
 
 def tuned_portion(card: Dict, period: Optional[Dict[str, str]],
-                  profile: Optional[Dict] = None) -> str:
+                  profile: Optional[Dict] = None, combo_first: bool = True) -> str:
     """把「牌意的份量倾向」+「时段」+「你在这个时段的实际习惯」合成推荐形态。
 
     有画像且该时段样本足够时，以你的真实习惯为准：
     你早餐一直点组合，就别硬推单品；你下午茶历来只买一样，也别塞套餐。
+
+    combo_first：默认把形态往套餐方向推（套餐更完整、也更容易吃到立减和满减券）。
+    真正是否给套餐还要看菜单里有没有对应套餐（由 combo_option 决定），
+    这里只负责「愿望」，不凭空捏造。
     """
     base = tarot_deck.portion_of(card)
     if not period:
         return base
     key = period["key"]
-    learned = (((profile or {}).get("periods") or {}).get(key) or {}).get("top_form")
-    if learned == "combo":
-        return {"light": "single", "single": "combo", "combo": "combo", "share": "share"}[base]
-    if learned == "single":
+    pinfo = ((profile or {}).get("periods") or {}).get(key) or {}
+    learned = pinfo.get("top_form")
+    count = int(pinfo.get("count") or 0)
+
+    # 1 笔订单还称不上「习惯」，别拿它压过牌意
+    if learned == "combo" and count >= 2:
+        return {"light": "combo" if combo_first else "single", "single": "combo",
+                "combo": "combo", "share": "share"}[base]
+    if learned == "single" and count >= 5 and not combo_first:
         return {"light": "light", "single": "single", "combo": "single", "share": "combo"}[base]
     if key in ("lunch", "dinner"):
         return {"light": "single", "single": "combo", "combo": "combo", "share": "share"}[base]
     if key in ("afternoon", "night"):
-        return {"light": "light", "single": "light", "combo": "single", "share": "combo"}[base]
-    return {"light": "light", "single": "single", "combo": "single", "share": "combo"}[base]
+        return {"light": "combo" if combo_first else "light",
+                "single": "combo" if combo_first else "light",
+                "combo": "combo", "share": "combo"}[base]
+    return {"light": "combo" if combo_first else "light",
+            "single": "single" if not combo_first else "combo",
+            "combo": "combo", "share": "combo"}[base]
+
+
+def _worth_combo(item: Dict, card: Dict, period: Optional[Dict[str, str]],
+                 profile: Optional[Dict] = None) -> bool:
+    """这个套餐值不值得把牌面的「轻」升级成「整套」。
+
+    夜宵/下午茶碰上本身就清简的牌（隐士、节制这类），
+    如果套餐既没券也没立减，就保持轻盈——需求是「多给套餐」，不是「硬塞套餐」。
+    """
+    base = tarot_deck.portion_of(card)
+    key = (period or {}).get("key")
+    if base != "light" or key not in ("afternoon", "night"):
+        return True
+    if mcp_client.deal_for(item, profile, period):
+        return True
+    return mcp_client.discount_ratio(item) >= 0.08
 
 
 _FORM_CN = {"combo": "套餐", "single": "单品", "share": "分享装", "light": "轻食"}
 
 
 def _portion_note(card: Dict, item: Dict, period: Optional[Dict[str, str]],
-                  profile: Optional[Dict] = None) -> str:
+                  profile: Optional[Dict] = None, upgraded: bool = False) -> str:
     """一句话解释「为什么给你配了这个形态」。
 
     关键：形态和牌面不一致时（牌面偏套餐、实际给单品），不能再说「牌面偏套餐」，
@@ -125,11 +154,19 @@ def _portion_note(card: Dict, item: Dict, period: Optional[Dict[str, str]],
     """
     base = tarot_deck.portion_of(card)
     label = tarot_deck.PORTION_LABEL.get(base, "单品")
-    form = item.get("form") or ("combo" if "套餐" in str(item.get("name")) else "single")
+    form = item.get("form") or ("combo" in str(item.get("name")) and "combo" or "single")
     form_cn = _FORM_CN.get(form, "单品")
     pname = period["name"] if period else ""
     key = (period or {}).get("key")
     learned = (((profile or {}).get("periods") or {}).get(key) or {}).get("top_form")
+
+    if upgraded and form in ("combo", "share"):
+        if item.get("deal"):
+            return f"牌面偏「{label}」，不过这份套餐能用券、也吃得更完整，就给你配齐"
+        if mcp_client.discount_ratio(item) > 0:
+            return f"牌面偏「{label}」，这份套餐自带立减，比单点划算"
+        return f"牌面偏「{label}」，{pname}配套餐更完整，不用再一样样凑" if pname \
+            else f"牌面偏「{label}」，套餐配得齐，省得一样样凑"
 
     heavy_base = base in ("combo", "share")
     heavy_form = form in ("combo", "share")
@@ -219,6 +256,7 @@ def do_reading(
     menu: Optional[List[Dict]] = None,
     at: Optional[str] = None,
     profile: Optional[Dict] = None,
+    combo_first: bool = True,
 ) -> Dict:
     """生成一次完整解读，返回含 markdown 的字典。
 
@@ -228,6 +266,8 @@ def do_reading(
     at: 指定点餐时间 "YYYY-MM-DD HH:MM"（默认现在），用于按时段调整推荐。
     profile: 口味画像（profile.py 构建）；给出时会在牌意范围内优先你爱吃的、
     并提示可用优惠券。为 None 时自动读本地画像，读不到就只按牌意推荐。
+    combo_first: 默认偏向套餐——套餐更完整、更容易吃到立减和满减券；
+    只有当菜单里真有对应套餐、且套餐有一定优惠（或有立减）时才升级。
     """
     if at:
         now = datetime.strptime(at, "%Y-%m-%d %H:%M")
@@ -255,14 +295,28 @@ def do_reading(
     saving_lines: List[str] = []
 
     for idx, (card, orientation, position) in enumerate(drawn, 1):
-        prefer = tuned_portion(card, period, profile)
+        prefer = tuned_portion(card, period, profile, combo_first=combo_first)
+        # 套餐优先：菜单里真有对应套餐、且这顿套餐值得，就把形态升级成套餐
+        combo_up = None
+        if combo_first:
+            cand = mcp_client.combo_option(card, menu, exclude=used_foods,
+                                           profile=profile, period=period)
+            if cand and _worth_combo(cand, card, period, profile):
+                combo_up = cand
+                prefer = "combo"
         item = resolve_item(card, menu, exclude=used_foods, prefer_form=prefer,
                             profile=profile, period=period)
+        # 关键词池里没有套餐、但同品类里有更划算的套餐 → 用套餐接管
+        if combo_up and mcp_client._form(item) not in ("combo", "share"):
+            item = mcp_client.finalize_item(combo_up, profile, period, match="combo-upgrade")
+        # 牌面本来是轻/单、最后给了套餐 → 这是「套餐优先」调的，文案要交代理由
+        upgraded = (mcp_client._form(item) in ("combo", "share")
+                    and tarot_deck.portion_of(card) in ("light", "single"))
         name = item.get("name", card.get("mcd_category", "麦麦餐品"))
         used_foods.add(str(name))
         price = _fmt_price(item.get("price"))
         price_text = f"（{price}）" if price else ""
-        note = _portion_note(card, item, period, profile)
+        note = _portion_note(card, item, period, profile, upgraded=upgraded)
         form = item.get("form") or "single"
         form_label = {"combo": "套餐", "share": "分享装", "light": "轻食", "single": "单品"}.get(form, "单品")
         orig = item.get("original_price")
@@ -283,10 +337,15 @@ def do_reading(
         deal_text = ""
         if deal:
             more = "再" if saving_text else ""
+            kind = deal.get("kind")
             if deal.get("free"):
                 deal_text = f"卡包里有「{deal['title']}」0 元券，这道直接免单（{more}省 ¥{_fmt_price(deal['saving'])[1:]}）"
             elif deal.get("bogo"):
                 deal_text = f"有「{deal['title']}」，两件相当于{more}省 ¥{_fmt_price(deal['saving'])[1:]}"
+            elif kind == "threshold":
+                # 满减券能和套餐立减叠着用，这是套餐最实在的地方
+                deal_text = (f"再叠满减「{deal['title']}」，{more}省 ¥{_fmt_price(deal['saving'])[1:]}，"
+                             f"到手约 ¥{_fmt_price(deal['price'])[1:]}")
             else:
                 deal_text = (f"用「{deal['title']}」后 ¥{_fmt_price(deal['price'])[1:]}，"
                              f"{more}省 ¥{_fmt_price(deal['saving'])[1:]}")
@@ -352,6 +411,8 @@ def do_reading(
             "saving": saving_text,
             "saving_value": round(card_saving, 1),
             "deal": deal_text,
+            "deal_kind": (deal or {}).get("kind") or "",
+            "combo_upgraded": upgraded,
             "alternative": alt_text,
             "affinity": item.get("affinity") or 0,
             "affinity_why": pref_why,
@@ -367,6 +428,12 @@ def do_reading(
         lines.extend(saving_lines)
         if total_saving >= 0.5:
             lines.append(f"\n**合计可省约 ¥{_fmt_price(total_saving)[1:]}**（券以结算页实际可用为准）")
+        combo_count = sum(1 for c in cards_block if c.get("form") in ("combo", "share"))
+        if combo_count:
+            lines.append(
+                f"> 这 {len(cards_block)} 张牌里给你配了 {combo_count} 份套餐："
+                "套餐自带的立减和满减券可以叠着用，比自己一样样点更省。"
+            )
         if claim_note:
             lines.append(f"> {claim_note}")
         if combo_note:
@@ -421,10 +488,12 @@ def do_week_reading(
     token: Optional[str] = None,
     menu: Optional[List[Dict]] = None,
     profile: Optional[Dict] = None,
+    combo_first: bool = True,
 ) -> Dict:
     """本周餐单：周一至周日各一张牌、一道菜，尽量不重样。
 
     start_date 为本周任意一天（默认今天），自动对齐到本周周一。
+    combo_first 默认给套餐（配得齐、也更容易吃到立减与满减券）。
     """
     base_day = date.fromisoformat(start_date) if start_date else date.today()
     monday = base_day - timedelta(days=base_day.weekday())
@@ -453,7 +522,12 @@ def do_week_reading(
         d = monday + timedelta(days=i)
         d_str = d.isoformat()
         card, orientation, _pos = draw("today", d_str)[0]
-        item = resolve_item(card, menu, exclude=used_foods, profile=profile)
+        combo_up = mcp_client.combo_option(card, menu, exclude=used_foods,
+                                           profile=profile) if combo_first else None
+        item = resolve_item(card, menu, exclude=used_foods, profile=profile,
+                            prefer_form="combo" if combo_first else None)
+        if combo_up and mcp_client._form(item) not in ("combo", "share"):
+            item = mcp_client.finalize_item(combo_up, profile, match="combo-upgrade")
         name = str(item.get("name"))
         used_foods.add(name)
         price = _fmt_price(item.get("price"))
@@ -519,7 +593,10 @@ def main() -> None:
     ap.add_argument("--card-svg", default=None, help="生成塔罗牌面卡片（SVG 路径）")
     ap.add_argument("--profile-file", default=None, help="口味画像 JSON（默认读 ~/.cache/mcd-tarot/profile.json）")
     ap.add_argument("--no-profile", action="store_true", help="不使用口味画像，只按牌意推荐")
+    ap.add_argument("--single-only", action="store_true",
+                    help="关掉套餐优先（默认优先给套餐，套餐更容易吃到立减与满减券）")
     args = ap.parse_args()
+    combo_first = not args.single_only
 
     token = os.environ.get(args.token_env) if args.token_env else None
     profile = False if args.no_profile else None
@@ -552,10 +629,11 @@ def main() -> None:
             menu = None
 
     if args.week:
-        result = do_week_reading(args.date, args.mood, token, menu=menu, profile=profile)
+        result = do_week_reading(args.date, args.mood, token, menu=menu, profile=profile,
+                                 combo_first=combo_first)
     else:
         result = do_reading(args.spread, args.date, args.mood, token, menu=menu,
-                            at=args.at, profile=profile)
+                            at=args.at, profile=profile, combo_first=combo_first)
 
     print(result["markdown"])
     print(f"\n[菜单来源] {result['menu_source']}　[口味画像] {'已使用' if result.get('profile_used') else '未使用'}")

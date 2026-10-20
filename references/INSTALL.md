@@ -11,7 +11,8 @@ mcd-tarot/
 ├── SKILL.md            # 技能定义、工作流、触发边界
 ├── scripts/            # 牌组 / 引擎 / 画像 / 缓存 / 自检 / 塔罗牌面 / 下单辅助 / 菜单归一化 / 测试
 │   ├── tarot_deck.py       tarot_engine.py    mcp_client.py     profile.py
-│   ├── menu_from_connector.py   cache.py      selfcheck.py    tarot_card.py    order.py
+│   ├── menu_from_connector.py   cache.py      selfcheck.py    quick.py         order.py
+│   ├── tarot_art.py   tarot_card.py   # 牌面图形元件 + 排版
 │   └── tests/test_tarot_engine.py
 ├── references/         # README、MCP 集成说明、示例解读、参赛材料、本文件
 ├── assets/             # 配置模板：mcp-config.example.json、.env.example、requirements.txt
@@ -40,7 +41,7 @@ git add -A && git commit -m "..." && git push
 ## 自检
 ```bash
 cd ~/.workbuddy/skills/mcd-tarot
-python3 scripts/tests/test_tarot_engine.py     # 30 项单元测试
+python3 scripts/tests/test_tarot_engine.py     # 39 项单元测试
 python3 scripts/selfcheck.py                   # 价格覆盖 / 误映射 / 重复牌
 python3 scripts/profile.py show                # 看画像学到了什么
 python3 scripts/tarot_engine.py --spread today  # 离线抽牌（无真实菜单时用示例菜单）
@@ -58,7 +59,7 @@ python3 scripts/tarot_engine.py --spread today  # 离线抽牌（无真实菜单
 - 抽签修正：`draw()` 改为无放回抽样，同一牌阵不再出现重复牌。
 - 匹配修正：`resolve_item` 改为「同名 → 单品优先 → 名称最短」，排除周边/贴纸/酱料，支持 `exclude` 去重。
 - 词表校准：22 张大阿卡纳按真实菜单重校，78/78 牌可匹配到带价单品。
-- 体验优化：门店记忆 + 当日菜单缓存（`cache.py`）、换季自检（`selfcheck.py`）、三选一与本周餐单、塔罗牌面卡片（`tarot_card.py`）。
+- 体验优化：门店记忆 + 当日菜单缓存（`cache.py`）、换季自检（`selfcheck.py`）、三选一与本周餐单、塔罗牌面卡片（`tarot_art.py` + `tarot_card.py`：汉堡圣像 + 法器 + 星月）、零网络快速路径（`quick.py`）、套餐优先与满减券叠加。
 - 推荐升级：按时段（早餐/午餐/下午茶/晚餐/夜宵）与牌意份量倾向推荐套餐或单品，展示立省金额。
 - 个性化：`profile.py` 从历史订单学口味与各时段习惯，引擎在牌意范围内优先你爱吃的，并提示「这道刚好能用哪张券」。
 - 下单能力：`order.py` 出确认卡并记录订单，真实下单/支付走连接器，付款始终由用户本人完成。

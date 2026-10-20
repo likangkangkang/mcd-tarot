@@ -205,7 +205,7 @@ def test_cache_store_roundtrip(tmp_note=None):
 
 
 def test_period_combo_at_lunch_single_at_night():
-    """同一张牌：午餐时段推套餐，夜宵时段推单品。"""
+    """同一张牌：午餐时段推套餐；夜宵默认也往套餐走，关掉 combo_first 才回落轻食。"""
     from datetime import datetime
 
     card = tarot_deck.find_card("星币七")   # 星币花色 → 汉堡类关键词
@@ -220,14 +220,18 @@ def test_period_combo_at_lunch_single_at_night():
     assert night["name"] == "夜宵", night
 
     p_lunch = tarot_engine.tuned_portion(card, lunch)
-    p_night = tarot_engine.tuned_portion(card, night)
+    p_night = tarot_engine.tuned_portion(card, night)                      # 默认套餐优先
+    p_night_off = tarot_engine.tuned_portion(card, night, combo_first=False)  # 老行为
     assert p_lunch == "combo", p_lunch
-    assert p_night in ("light", "single"), p_night
+    assert p_night == "combo", p_night
+    assert p_night_off in ("light", "single"), p_night_off
 
     lunch_item = mcp_client.resolve_item(card, menu, prefer_form=p_lunch)
     night_item = mcp_client.resolve_item(card, menu, prefer_form=p_night)
+    night_item_off = mcp_client.resolve_item(card, menu, prefer_form=p_night_off)
     assert "三件套" in lunch_item["name"], lunch_item
-    assert night_item["name"] == "巨无霸", night_item
+    assert night_item["form"] == "combo", night_item        # 默认套餐优先
+    assert night_item_off["name"] == "巨无霸", night_item_off  # 关掉后回到单品
 
 
 def test_reading_reports_period_and_form():
@@ -259,7 +263,10 @@ def test_tarot_card_renders_with_and_without_image(tmp_path=None):
     svg = tarot_card._card_svg(card, {"date": "2026-10-20"})
     assert "战车" in svg and "逆位" in svg, "牌名与逆位标记应出现在牌面"
     assert "VII" in svg, "大阿卡纳应显示罗马数字"
-    assert "clipPath" in svg and "arch" in svg, "应有拱形画框"
+    # 拱形画窗用 mask 实现（Chrome 无头渲染下弧形 clipPath 会把内容整片裁掉）
+    assert "archMask" in svg and 'mask="url(#archMask)"' in svg, "应有拱形画窗"
+    assert "burger" not in svg and "<image" not in svg, "默认不贴商品照，保持塔罗感"
+    assert "rotate(180" in svg, "逆位时圣像应倒置"
     out = tarot_card.render(reading, str(os.path.join(os.path.dirname(__file__), "_tmp_card.svg")))
     assert os.path.exists(out)
     os.remove(out)
@@ -426,6 +433,137 @@ def test_light_preference_avoids_combo_in_fallback():
     for _ in range(6):
         item = mcp_client.resolve_item(card, menu, exclude=set(), prefer_form="light")
         assert item["form"] == "single", item
+
+
+def _coupon_profile():
+    """一张单品券 + 一张满减券，用来验证「套餐能叠加优惠、单品券不越界」。"""
+    return {
+        "favorites": [{"name": "麦辣鸡腿汉堡", "count": 2}],
+        "traits": {"chicken": 0.8},
+        "coupons": [
+            {"title": "11.9元麦辣鸡腿堡", "core": "麦辣鸡腿堡", "price": 11.9,
+             "bogo": False, "combo": False, "combo_scope": False,
+             "threshold": None, "threshold_off": None,
+             "source": "claimable", "keywords": ["麦辣鸡腿堡"]},
+            {"title": "满30减5", "core": "满减", "price": 5.0,
+             "bogo": False, "combo": False, "combo_scope": False,
+             "threshold": 30.0, "threshold_off": 5.0,
+             "source": "wallet", "keywords": []},
+        ],
+    }
+
+
+def test_combo_can_stack_threshold_coupon():
+    """套餐能用满减券；单品券仍然不能抵扣套餐。"""
+    prof = _coupon_profile()
+    combo = {"name": "麦辣鸡腿汉堡三件套", "price": 39.0, "form": "combo", "category": "套餐"}
+    single = {"name": "麦辣鸡腿堡", "price": 23.0, "form": "single", "category": "汉堡"}
+
+    d_combo = mcp_client.deal_for(combo, prof)
+    assert d_combo, "套餐应能用满减券"
+    assert d_combo["kind"] == "threshold", d_combo
+    assert abs(d_combo["saving"] - 5.0) < 0.01, d_combo
+
+    d_single = mcp_client.deal_for(single, prof)
+    assert d_single and abs(d_single["saving"] - 11.1) < 0.01, d_single
+
+    # 单品券（11.9 麦辣鸡腿堡）绝不能被算到套餐头上
+    only_item_coupon = {"favorites": [{"name": "x", "count": 1}],
+                        "coupons": [prof["coupons"][0]]}
+    assert mcp_client.deal_for(combo, only_item_coupon) is None, "单品券误抵套餐"
+
+
+def test_combo_first_raises_combo_share():
+    """默认套餐优先：同样的牌和菜单，开启后套餐占比明显更高。"""
+    menu = [
+        {"name": "巨无霸", "code": "1", "price": 26.0, "category": "汉堡", "form": "single"},
+        {"name": "巨无霸三件套", "code": "2", "price": 37.0, "original_price": 50.5,
+         "category": "汉堡", "form": "combo"},
+        {"name": "麦香鸡", "code": "3", "price": 22.0, "category": "汉堡", "form": "single"},
+        {"name": "麦香鸡套餐", "code": "4", "price": 32.0, "original_price": 42.0,
+         "category": "汉堡", "form": "combo"},
+    ]
+
+    def combo_share(combo_first):
+        hit = total = 0
+        for day in range(1, 21):
+            r = tarot_engine.do_reading("trinity", f"2026-11-{day:02d}", menu=menu,
+                                        at=f"2026-11-{day:02d} 12:30", profile=None,
+                                        combo_first=combo_first)
+            for c in r["cards"]:
+                total += 1
+                hit += c["form"] in ("combo", "share")
+        return hit / total
+
+    on, off = combo_share(True), combo_share(False)
+    assert on > off, (on, off)
+    # 测试菜单只有 4 项（啤酒饮料甜品的牌没有套餐可落），能过一半就说明倾向生效
+    assert on >= 0.55, f"套餐优先后套餐占比应明显偏高，实际 {on:.0%}"
+
+
+def test_combo_option_prefers_bigger_discount():
+    """同类套餐里优先挑折扣更深的那份。"""
+    card = {"id": 7, "mcd_keywords": ["巨无霸"], "mcd_category": "汉堡"}
+    menu = [
+        {"name": "巨无霸", "price": 26.0, "form": "single", "category": "汉堡"},
+        {"name": "巨无霸三件套", "price": 40.0, "original_price": 42.0,
+         "form": "combo", "category": "汉堡"},
+        {"name": "巨无霸超值套餐", "price": 33.0, "original_price": 52.0,
+         "form": "combo", "category": "汉堡"},
+    ]
+    pick = mcp_client.combo_option(card, menu)
+    assert pick and "超值" in pick["name"], pick
+
+
+def test_major_arcana_have_category():
+    """22 张大阿卡纳都必须有 mcd_category，否则「同品类兜底」对它们永远不生效。"""
+    majors = [c for c in tarot_deck.ALL_CARDS if c["id"] < 22]
+    missing = [c["name_cn"] for c in majors if not c.get("mcd_category")]
+    assert not missing, f"这些大阿卡纳缺品类：{missing}"
+
+
+def test_cat_match_bridges_two_naming_systems():
+    """牌组品类（主食汉堡薯条）要能对上门店分类（鸡肉汉堡/卷、麦咖啡™）。"""
+    pairs = [("鸡肉汉堡/卷", "主食汉堡薯条"), ("巨无霸牛鱼肉堡", "主食汉堡薯条"),
+             ("麦咖啡™", "饮品甜饮"), ("饮品", "饮品甜饮"),
+             ("小食甜品/其他", "辣味炸鸡"), ("安格斯MAX厚牛堡", "主食汉堡薯条")]
+    for menu_cat, card_cat in pairs:
+        assert mcp_client.cat_match(menu_cat, card_cat), (menu_cat, card_cat)
+    assert not mcp_client.cat_match("饮品", "主食汉堡薯条"), "饮品不该被当成主食"
+
+
+def test_any_combo_fallback_uses_pick_your_own():
+    """同品类没有套餐时，「随心配」这种自选组合要能兜住任意一张牌。"""
+    menu = [
+        {"name": "麦香鸡", "code": "1", "price": 22.0, "form": "single", "category": "鸡肉汉堡/卷"},
+        {"name": "人气经典随心配", "code": "2", "price": 13.9, "form": "combo", "category": "人气热卖"},
+    ]
+    # 一张指向饮品的牌：饮品品类下没有套餐，靠「随心配」兜底
+    card = {"id": 17, "mcd_keywords": ["拿铁", "麦咖啡"], "mcd_category": "饮品甜饮"}
+    pick = mcp_client.combo_option(card, menu)
+    assert pick and "随心配" in pick["name"], pick
+
+
+def test_combo_first_mostly_combo_when_menu_rich():
+    """菜单里各品类都有套餐时，套餐优先后应该基本都给套餐。"""
+    menu = [
+        {"name": "巨无霸", "code": "1", "price": 26.0, "category": "巨无霸牛鱼肉堡", "form": "single"},
+        {"name": "巨无霸三件套", "code": "2", "price": 37.0, "original_price": 50.5,
+         "category": "巨无霸牛鱼肉堡", "form": "combo"},
+        {"name": "麦辣鸡腿汉堡", "code": "3", "price": 23.0, "category": "鸡肉汉堡/卷", "form": "single"},
+        {"name": "麦辣鸡腿堡套餐", "code": "4", "price": 33.0, "original_price": 44.0,
+         "category": "鸡肉汉堡/卷", "form": "combo"},
+        {"name": "可乐", "code": "5", "price": 9.5, "category": "饮品", "form": "single"},
+        {"name": "人气经典随心配", "code": "6", "price": 13.9, "category": "人气热卖", "form": "combo"},
+    ]
+    hit = total = 0
+    for day in range(1, 26):
+        r = tarot_engine.do_reading("trinity", f"2026-12-{day:02d}", menu=menu,
+                                    at=f"2026-12-{day:02d} 12:30", profile=None)
+        for c in r["cards"]:
+            total += 1
+            hit += c["form"] in ("combo", "share")
+    assert hit / total >= 0.85, f"套餐占比只有 {hit / total:.0%}"
 
 
 if __name__ == "__main__":

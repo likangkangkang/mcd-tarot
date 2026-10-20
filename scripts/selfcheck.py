@@ -135,7 +135,8 @@ def main() -> None:
         for s in report["suspicious"]:
             print(f"  · {s['card']} → {s['food']}")
     print(f"- 重复牌：{report['dup_card_samples']}（{args.days} 天 × 3 牌阵）")
-    print(f"- 同阵重复菜品：{report['dup_food_samples']}")
+    print(f"- 同阵重复菜品：{report['dup_food_samples']}"
+          "（套餐优先后，套餐少的门店容易三张牌撞同一份，换完整菜单会低很多）")
 
     if report["ok"]:
         print("\n结论：牌面映射健康，可以放心抽。")
