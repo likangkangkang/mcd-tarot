@@ -116,7 +116,7 @@ mcd-tarot/
 │   ├── quick.py                # 零网络快速抽牌（全本地缓存，30ms 级）
 │   ├── selfcheck.py            # 换季自检：价格覆盖 / 误映射 / 重复牌
 │   ├── order.py                # 下单确认卡 + 订单记录（不代付）
-│   └── tests/                  # 单元测试（47 项）
+│   └── tests/                  # 单元测试（49 项）
 ├── references/                 # 安装维护 / MCP 集成 / 示例解读 / 参赛声明
 ├── assets/                     # 连接器配置模板、requirements、示例牌面
 └── 运行时数据在 ~/.cache/mcd-tarot/（门店、当日菜单、口味画像、订单，不入库）
@@ -125,7 +125,7 @@ mcd-tarot/
 ## 自检与维护
 
 ```bash
-python3 scripts/tests/test_tarot_engine.py   # 47 项单测
+python3 scripts/tests/test_tarot_engine.py   # 49 项单测
 python3 scripts/selfcheck.py                 # 换季自检，非零退出说明要修关键词
 python3 scripts/cache.py clear --all         # 缓存坏了就重建
 python3 scripts/profile.py clear             # 用户说「别记我」

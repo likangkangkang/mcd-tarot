@@ -691,6 +691,39 @@ def test_card_face_prints_combo_contents():
     assert "内有" in svg, "牌面没有印套餐内容"
 
 
+def test_ingest_takes_selected_choices_not_round_names():
+    """query-meal-detail 的 rounds[].choices[] 里有一堆「可换没选」的候选，
+    抽取时只认 isDefault=1 / quantity>0 的那几项，且不能用轮次名（「选择套餐内小食」）当餐品名。"""
+    import combo_detail
+    raw = {"data": {"code": "9900005466", "name": "巨无霸三件套", "rounds": [
+        {"id": 1, "name": "新升级巨无霸", "quantity": 1,
+         "choices": [{"code": "1100", "name": "巨无霸", "quantity": 1, "isDefault": 1}]},
+        {"id": 2, "name": "选择套餐内小食", "quantity": 1, "choices": [
+            {"code": "4810", "name": "中薯条", "quantity": 1, "isDefault": 1},
+            {"code": "4820", "name": "大薯条", "quantity": 0, "isDefault": 0},
+            {"code": "4437", "name": "小杯玉米杯", "quantity": 0, "isDefault": 0}]},
+        {"id": 3, "name": "选择套餐内饮料", "quantity": 1, "choices": [
+            {"code": "3050", "name": "可乐中杯", "quantity": 1, "isDefault": 1},
+            {"code": "3100", "name": "可乐大杯", "quantity": 0, "isDefault": 0}]},
+    ]}}
+    got = combo_detail.ingest(raw, "9900005466")
+    assert [i["name"] for i in got] == ["巨无霸", "中薯条", "可乐中杯"], got
+    assert all(i["qty"] == 1 for i in got)
+    d = combo_detail.describe({"name": "巨无霸三件套", "code": "9900005466"})
+    assert d["source"] == "cache" and d["exact"] is True
+    assert "选择套餐内小食" not in d["text"] and "大薯条" not in d["text"], d["text"]
+    assert d["text"] == "巨无霸 ×1 ｜ 中薯条 ×1 ｜ 可乐中杯 ×1"
+
+
+def test_ingest_plain_items_still_works():
+    """没有 choices 嵌套、就是一份平铺明细时，行为保持原样。"""
+    import combo_detail
+    raw = {"data": {"code": "C1", "name": "测试双人餐",
+                    "items": [{"name": "汉堡", "quantity": 2}, {"name": "可乐", "quantity": 2}]}}
+    got = combo_detail.ingest(raw, "C1")
+    assert [(i["name"], i["qty"]) for i in got] == [("汉堡", 2), ("可乐", 2)], got
+
+
 if __name__ == "__main__":
     mod = sys.modules[__name__]
     fns = [getattr(mod, n) for n in dir(mod) if n.startswith("test_")]

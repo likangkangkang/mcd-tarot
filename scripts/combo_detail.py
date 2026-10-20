@@ -43,6 +43,12 @@ _ITEM_KEYS = (
 _QTY_KEYS = ("qty", "quantity", "count", "num", "nums", "amount", "number",
              "mealCount", "meal_count", "productCount", "product_count")
 _NAME_KEYS = ("name", "mealName", "productName", "title", "itemName", "skuName")
+# 子项是否被选中（query-meal-detail 的 rounds[].choices[] 用 isDefault）
+_SELECT_KEYS = ("isDefault", "default", "isdefault", "selected", "isSelected",
+                "is_selected", "checked", "isChecked")
+# 容器字段：命中时优先往里钻，拿到「具体餐品」而不是「轮次名」
+_GROUP_KEYS = ("choices", "comboItemList", "comboItems", "subItems", "sub_items",
+               "items", "products", "children", "roundList", "rounds")
 
 # 套餐名里的件数
 _PIECES = {
@@ -122,11 +128,41 @@ def put_detail(name: str, items: List[Dict[str, Any]], code: Optional[str] = Non
 # ---------------------------------------------------------------------------
 # 从原始返回里抽明细
 # ---------------------------------------------------------------------------
+def _qty_of(it: Dict[str, Any]) -> int:
+    """解析数量：明确写了 0 就是没选这份。"""
+    for k in _QTY_KEYS:
+        if it.get(k) not in (None, ""):
+            try:
+                return int(float(it[k]))
+            except (TypeError, ValueError):
+                return 1
+    return 1
+
+
+def _selected_of(it: Dict[str, Any]) -> Optional[bool]:
+    """套餐子项的选择态（isDefault / selected / checked …），没有这个字段返回 None。"""
+    for k in _SELECT_KEYS:
+        if k in it:
+            v = it[k]
+            if isinstance(v, bool):
+                return v
+            try:
+                return int(float(v)) > 0
+            except (TypeError, ValueError):
+                return None
+    return None
+
+
 def _clean_items(raw_items: Any) -> List[Dict[str, Any]]:
-    """把任意形态的明细列表整理成 [{"name", "qty"}, ...]。"""
+    """把任意形态的明细列表整理成 [{"name", "qty"}, ...]。
+
+    套餐的 rounds/choices 里通常带着一堆「可换但没选」的候选项，
+    只保留真正选中的（isDefault=1 或 quantity>0），避免把整张候选表当成内含物。
+    """
     out: List[Dict[str, Any]] = []
     if not isinstance(raw_items, list):
         return out
+    marked = False  # 这个列表里是否存在「选择态」标记
     for it in raw_items:
         if isinstance(it, str) and it.strip():
             out.append({"name": it.strip(), "qty": 1})
@@ -136,15 +172,18 @@ def _clean_items(raw_items: Any) -> List[Dict[str, Any]]:
         nm = next((it[k] for k in _NAME_KEYS if it.get(k)), None)
         if not nm:
             continue
-        qty = 1
-        for k in _QTY_KEYS:
-            if it.get(k) not in (None, ""):
-                try:
-                    qty = int(float(it[k]))
-                except (TypeError, ValueError):
-                    qty = 1
-                break
+        qty = _qty_of(it)
+        sel = _selected_of(it)
+        if sel is not None:
+            marked = True
+        if sel is False or qty <= 0:
+            continue
         out.append({"name": str(nm).strip(), "qty": max(1, qty)})
+    if not out and marked:
+        # 极端情况：候选里一个都没标选中，那就退回「有名字的」前几项，不给空
+        out = [{"name": str(next(it[k] for k in _NAME_KEYS if it.get(k))).strip(), "qty": 1}
+               for it in raw_items
+               if isinstance(it, dict) and any(it.get(k) for k in _NAME_KEYS)]
     return out
 
 
@@ -162,6 +201,22 @@ def _scan(node: Any, depth: int = 0) -> List[Dict[str, Any]]:
     if depth > 6:
         return []
     if isinstance(node, list):
+        # 列表项是「轮次/分组」时（如 rounds:[{name:'选小食', choices:[...]}]），
+        # 名字是轮次名不是餐品名，必须钻进子列表，否则会写出「选择套餐内小食 ×1」
+        grouped: List[Dict[str, Any]] = []
+        for x in node:
+            if not isinstance(x, dict):
+                continue
+            for k in _GROUP_KEYS:
+                sub = x.get(k)
+                if not isinstance(sub, list) or not sub:
+                    continue
+                picked = _clean_items(sub) or _scan(sub, depth + 1)
+                if picked:
+                    grouped.extend(picked)
+                    break
+        if grouped:
+            return grouped
         got = _clean_items(node)
         if got:
             return got
