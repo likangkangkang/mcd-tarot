@@ -8,25 +8,41 @@
 
 > 牌面由 `scripts/tarot_art.py` + `scripts/tarot_card.py` 纯代码绘制：深靛夜空、旧金双线框、拱形画窗、罗马数字、月相与星点。主画面把一份汉堡画成**披着生菜披风、头顶光环、张臂托着法器**的圣像；大阿卡纳各有自己的法器与天空（愚者的太阳、正义的天平与餐刀、世界的花环），小阿卡纳则把薯条/可乐/餐刀/汉堡币按张数串成一道半圆光环。逆位时圣像整体倒置。**不再把商品照贴进画框**，需要时用 `--photo` 在底部小票旁加一枚圆形餐品章。
 
-## ⚡ 一句话安装（可直接转发）
+## ⚡ 安装（可直接转发）
 
 > **装上我，你就能预测自己的今日运势。** 🃏🍔
 > 每天抽一张麦麦塔罗牌，牌面是一幅把汉堡画成圣像的塔罗画，落点是你今天该吃的那一份。
 
-粘贴到终端，回车：
+### 方式一：上传技能包（推荐，云端版也能用）
+
+1. 拿技能包 `mcd-tarot-skill.zip`：仓库 **Releases** 页有就直接下载；
+   没有的话点右上角 **Code → Download ZIP** 拿到源码包后，本地跑一次 `python3 scripts/pack.py`
+   生成规范技能包（或按方式二 clone 后打包）。
+2. 打开 WorkBuddy 左侧【专家 · 技能 · 连接器】→ **技能** → **添加技能** → **上传技能**，
+   选中这个 zip，系统自动完成配置，不用再操作别的。
+3. 启用【连接器】`mcd-mcp`（模板见 `assets/mcp-config.example.json`），然后对它说「**今日运势**」。
+
+> 为什么不是 `git clone`：**云端版 WorkBuddy 出于安全不会帮你克隆并安装第三方仓库**（它会明确拒绝）。
+> 「上传技能包」是官方支持的分享方式，一次导入即可用。`git clone` 只适合你自己在桌面版手动部署。
+
+### 方式二：本地命令行（桌面版 / 自己的电脑）
 
 ```bash
 git clone https://github.com/likangkangkang/mcd-tarot.git ~/.workbuddy/skills/mcd-tarot
 ```
 
-Windows（PowerShell）用这一条：
+Windows（PowerShell）：
 
 ```powershell
 git clone https://github.com/likangkangkang/mcd-tarot.git "$HOME\.workbuddy\skills\mcd-tarot"
 ```
 
-然后在 WorkBuddy 里启用【连接器】`mcd-mcp`（模板见 `assets/mcp-config.example.json`），
-对它说一句「**今日运势**」就行——它会先自我介绍、问你要不要开始，你回「**是**」就够了。
+### 想让它出现在公开的「技能市场」
+
+按开放平台规范把技能包 zip 提交审核即可（详见 [open.workbuddy.cn/docs/skill](https://open.workbuddy.cn/docs/skill)）；
+解析失败可邮件联系 [openworkbuddy@tencent.com](mailto:openworkbuddy@tencent.com)。
+
+装好后对它说一句「**今日运势**」——它会先自我介绍、问你要不要开始，你回「**是**」就够了。
 
 ---
 

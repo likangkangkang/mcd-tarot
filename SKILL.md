@@ -1,5 +1,11 @@
 ---
 name: mcd-tarot
+display_name: 麦麦塔罗牌
+display_name_en: McDonald's Tarot
+description_zh: 每天抽一张塔罗牌，告诉你今天该吃麦当劳的哪一道，还能顺手叠券下单。
+description_en: Draw one tarot card a day and let it decide which McDonald's meal fits your day, with coupons applied.
+version: 1.0.0
+author: likangkangkang
 description: 用塔罗牌的仪式感做「一张图预测」：每次抽一张把汉堡画成塔罗圣像的牌面 + 一段暖心解读，默认优先套餐（并在套餐名下方写明每样餐品和数量）、叠加立减与满减券，结合口味习惯与点餐时段，确认后可直接下单（付款由用户本人完成）。支持「今日宜吃」与「按问题抽一张预测」两种单张场景，含正逆位、真实菜单价格与优惠。**首次被唤起时先自我介绍、说明能做什么，并询问是否开启今日运势（只需对方回答 是 / 否），得到肯定才抽牌**。仅做情绪陪伴与选餐建议；深度比价、凑单算最优券、代点外卖请用点餐/省钱类技能。
 agent_created: true
 ---

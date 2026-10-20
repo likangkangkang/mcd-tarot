@@ -7,3 +7,6 @@ __pycache__/
 
 # 系统
 .DS_Store
+
+# 打包产物（技能包 zip，由 scripts/pack.py 生成）
+dist/
