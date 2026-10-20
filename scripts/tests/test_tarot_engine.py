@@ -1,6 +1,6 @@
 """麦麦塔罗牌 · 单元测试（纯标准库，无第三方依赖）。
 
-运行: python tests/test_tarot_engine.py
+运行: python3 scripts/tests/test_tarot_engine.py
 """
 import os
 import sys

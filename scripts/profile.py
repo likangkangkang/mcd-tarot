@@ -38,7 +38,7 @@ import re
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 CACHE_DIR = Path(os.environ.get("MCD_TAROT_CACHE", Path.home() / ".cache" / "mcd-tarot"))
 PROFILE_PATH = CACHE_DIR / "profile.json"

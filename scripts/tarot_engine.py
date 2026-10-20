@@ -6,10 +6,10 @@
 
 用法
 ----
-    python tarot_engine.py                       # 今日一张（今日宜吃）
-    python tarot_engine.py --mood "有点累"
-    python tarot_engine.py --question "明天面试能顺利吗"
-    python tarot_engine.py --menu-file menu.json   # 注入 mcd-mcp 连接器真实菜单
+    python3 scripts/tarot_engine.py                       # 今日一张（今日宜吃）
+    python3 scripts/tarot_engine.py --mood "有点累"
+    python3 scripts/tarot_engine.py --question "明天面试能顺利吗"
+    python3 scripts/tarot_engine.py --menu-file menu.json   # 注入 mcd-mcp 连接器真实菜单
 
 作为库：
     from tarot_engine import do_reading
@@ -26,7 +26,7 @@ import json
 import os
 import random
 import re
-from datetime import date, datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -242,19 +242,26 @@ def _draw_one(rng: random.Random) -> Tuple[Dict, str]:
 
 
 def draw(spread_key: str = "today", date_str: str = "", salt: str = "",
-         reversed_chance: float = REVERSED_CHANCE):
+         reversed_chance: float = REVERSED_CHANCE,
+         card_pool: Optional[List[Dict]] = None):
     """抽**一张**牌，返回 [(card, orientation, position)]（固定一张）。
 
     salt 用于区分不同问题 / 场景：同日期、同 salt 可复现；换 salt（如不同问题）
     会抽到不同的牌，让「一张图预测」能服务任意提问而不总是同一张。
+
+    card_pool 用于在指定子集里抽签（如「只从 4 张国王里抽」）；为 None 时从
+    全部 78 张里抽。子集内仍按日期+盐值确定性可复现。
     """
     if spread_key not in SPREADS:
         raise ValueError(f"未知牌阵: {spread_key}，可选: {list(SPREADS)}")
     _, positions = SPREADS[spread_key]
+    pool = card_pool if card_pool else tarot_deck.ALL_CARDS
+    if not pool:
+        raise ValueError("card_pool 为空，无法抽签")
     base = f"{date_str}|{salt or spread_key}"
     rng = random.Random(daily_seed(base))
     rng_reversed = random.Random(daily_seed(base + ":rev"))
-    card = rng.choice(tarot_deck.ALL_CARDS)
+    card = rng.choice(pool)
     orientation = "rev" if rng_reversed.random() < reversed_chance else "up"
     return [(card, orientation, positions[0])]
 
@@ -303,6 +310,7 @@ def do_reading(
     combo_first: bool = True,
     lean: bool = False,
     question: Optional[str] = None,
+    card_pool: Optional[List[Dict]] = None,
 ) -> Dict:
     """生成一次完整解读，返回含 markdown 的字典。
 
@@ -344,7 +352,7 @@ def do_reading(
         except Exception:  # noqa: BLE001 - 画像是增强项，坏了不影响解读
             profile = None
     is_fallback = menu is mcp_client.FALLBACK_MENU
-    drawn = draw(spread_key, date_str, salt=salt)
+    drawn = draw(spread_key, date_str, salt=salt, card_pool=card_pool)
     # 位置标签随「今日/提问」切换
     drawn = [(card, orientation, position_label) for card, orientation, _ in drawn]
 

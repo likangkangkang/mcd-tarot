@@ -5,14 +5,14 @@
 
 用法
 ----
-    python menu_from_connector.py <query-meals响应.json> <输出菜单.json>
+    python3 scripts/menu_from_connector.py <query-meals响应.json> <输出菜单.json>
 
 WorkBuddy 内的典型链路：
     1. 调用连接器工具 query-nearby-stores（beType=1）取 storeCode；
     2. 调用连接器工具 query-meals（orderType=1, beType=1）拉真实菜单，
        原始返回写入 raw.json；
-    3. python scripts/menu_from_connector.py raw.json menu.json
-    4. python scripts/tarot_engine.py --spread today --menu-file menu.json
+    3. python3 scripts/menu_from_connector.py raw.json menu.json
+    4. python3 scripts/tarot_engine.py --spread today --menu-file menu.json
 """
 
 from __future__ import annotations

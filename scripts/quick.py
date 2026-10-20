@@ -45,6 +45,7 @@ import cache
 import mcp_client
 import profile as profile_mod
 import tarot_engine
+import tarot_deck
 
 
 def main() -> None:
@@ -66,6 +67,8 @@ def main() -> None:
     ap.add_argument("--json", dest="json_out", default=None, help="把结果写成 JSON")
     ap.add_argument("--no-profile", action="store_true", help="不用口味画像")
     ap.add_argument("--single-only", action="store_true", help="关掉套餐优先")
+    ap.add_argument("--king", action="store_true",
+                    help="只在 4 张国王（权杖/圣杯/宝剑/星币）里抽一张")
     ap.add_argument("--allow-fallback", action="store_true",
                     help="没有菜单缓存时用内置示例菜单（结果不代表真实门店）")
     ap.add_argument("--timing", action="store_true", help="打印各步骤耗时")
@@ -105,10 +108,13 @@ def main() -> None:
     mark("画像")
 
     combo_first = not args.single_only
+    card_pool = None
+    if args.king:
+        card_pool = [c for c in tarot_deck.ALL_CARDS if c.get("rank") == "king"]
     result = tarot_engine.do_reading(
         args.spread, args.date, args.mood, menu=menu,
         at=args.at, profile=prof, combo_first=combo_first,
-        lean=args.lean, question=args.question)
+        lean=args.lean, question=args.question, card_pool=card_pool)
     mark("抽牌")
 
     if args.inline:
