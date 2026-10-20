@@ -25,11 +25,13 @@ import os
 import random
 import re
 from datetime import date, datetime, timedelta
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import tarot_deck
 import mcp_client
 import combo_detail
+import tarot_sense
 from mcp_client import get_menu, resolve_item
 
 # 牌阵定义：key -> (中文名, 位置标签列表)
@@ -200,6 +202,42 @@ def _portion_note(card: Dict, item: Dict, period: Optional[Dict[str, str]],
     return f"牌面偏「{label}」，今天用{form_cn}接着"
 
 
+_PERIOD_CLOSER = {
+    "breakfast": "热的东西先下肚，这一天就立得住了。",
+    "lunch": "吃饱了，下午才扛得住。",
+    "afternoon": "慢一点吃，下午还长着呢。",
+    "dinner": "把这一顿吃完整，今天就算交代过去了。",
+    "night": "吃完就收工，剩下的留给明天。",
+}
+_CLOSERS = [
+    "趁热吃，别等它凉。",
+    "一口一口来，不用赶。",
+    "今天这点甜头，是你自己给自己的。",
+    "别分心，这一口是专门给你的。",
+    "吃完了再上，路还长。",
+]
+# 冷饮不说「趁热」，换个说法
+_CLOSERS_COLD = [
+    "趁冰的时候喝，风味最好。",
+    "慢慢啜，别一口闷。",
+    "这口凉的，正好给你降降温。",
+]
+_COLD_WORDS = ("可乐", "雪碧", "怡泉", "咖啡", "奶铁", "美式", "拿铁", "麦旋风",
+               "新地", "派", "果汁", "茶", "牛奶", "可可", "冰")
+
+
+def _closer(card: Dict, period: Optional[Dict[str, str]], idx: int = 0,
+            item: Optional[Dict] = None) -> str:
+    """解读落点句：优先用时段的语境，冷饮不说「趁热」，同一局内尽量不重样。"""
+    key = (period or {}).get("key")
+    nm = str((item or {}).get("name", ""))
+    cat = str((item or {}).get("category", ""))
+    cold = any(w in nm or w in cat for w in _COLD_WORDS)
+    pool = ([_PERIOD_CLOSER[key]] if key in _PERIOD_CLOSER else []) + \
+        (_CLOSERS_COLD if cold else _CLOSERS)
+    return pool[(int(card["id"]) + idx) % len(pool)]
+
+
 def daily_seed(date_str: str) -> int:
     """把日期字符串映射成稳定整数种子，保证同一天抽签结果一致。"""
     h = hashlib.sha256(date_str.encode("utf-8")).hexdigest()
@@ -259,8 +297,12 @@ def do_reading(
     at: Optional[str] = None,
     profile: Optional[Dict] = None,
     combo_first: bool = True,
+    lean: bool = False,
 ) -> Dict:
     """生成一次完整解读，返回含 markdown 的字典。
+
+    lean=True 时走「图在前、文在后」的精简文本：餐品清单/形态/价格都在牌面图里，
+    文字只留牌名、意涵、细腻解读与一句行动引导，不重复罗列。
 
     menu: 直接注入菜单（[{"name","price","code","category"}, ...]，通常由
     mcd-mcp 连接器的 query-meals 返回经 menu_from_connector.py 归一化而来）；
@@ -291,7 +333,8 @@ def do_reading(
 
     cards_block: List[Dict] = []
     lines: List[str] = [_mood_opening(mood, spread_name)]
-    lines.append(f"> ⏰ 现在是{period['name']}（{period['time']}）：{period['hint']}。\n")
+    if not lean:
+        lines.append(f"> ⏰ 现在是{period['name']}（{period['time']}）：{period['hint']}。\n")
     used_foods: set = set()
     total_saving = 0.0
     saving_lines: List[str] = []
@@ -376,23 +419,37 @@ def do_reading(
         meaning = card["reversed"] if orientation == "rev" else card["upright"]
         emotion = card["emotion_rev"] if orientation == "rev" else card["emotion_up"]
         ori_tag = "逆位" if orientation == "rev" else "正位"
+        fine = tarot_sense.lines_for(card, orientation)
+        closer = _closer(card, period, idx, item=item)
 
         lines.append(f"\n## {position}\n")
         lines.append(f"**{card['name_cn']} · {card['name_en']}**（{ori_tag}）")
-        lines.append(f"- 塔罗意涵：{meaning}")
-        lines.append(f"- 🍔 麦麦指引：**{name}**{price_text}")
-        if detail:
-            lines.append(f"  - 📦 这一份里有：{detail['text']}（{detail['note']}）")
-        lines.append(f"- 🍱 形态：{form_label} · {note}")
-        if pref_why:
-            lines.append(f"- 🧠 合你口味：{pref_why}")
-        if saving_text:
-            lines.append(f"- 💰 更划算：{saving_text}")
-        if deal_text:
-            lines.append(f"- 🎟 用券：{deal_text}")
-        if alt_text:
-            lines.append(f"- 🔁 或者更像你：{alt_text}")
-        lines.append(f"- 💛 给你的话：{emotion}")
+        if lean:
+            # 图在前文在后：清单、形态、价格都在牌面图里，文字不重复
+            lines.append(f"> 塔罗意涵：{meaning}")
+            if fine:
+                lines.append("")
+                first = fine[0]
+                if not first.endswith(("。", "！", "？", "…")):
+                    first += "。"
+                lines.append(first)
+                lines.extend(fine[1:])
+            lines.append(f"\n牌把它落在 **{name}** 上{f' · {price}' if price else ''}——{closer}")
+        else:
+            lines.append(f"- 塔罗意涵：{meaning}")
+            lines.append(f"- 🍔 麦麦指引：**{name}**{price_text}")
+            if detail:
+                lines.append(f"  - 📦 这一份里有：{detail['text']}（{detail['note']}）")
+            lines.append(f"- 🍱 形态：{form_label} · {note}")
+            if pref_why:
+                lines.append(f"- 🧠 合你口味：{pref_why}")
+            if saving_text:
+                lines.append(f"- 💰 更划算：{saving_text}")
+            if deal_text:
+                lines.append(f"- 🎟 用券：{deal_text}")
+            if alt_text:
+                lines.append(f"- 🔁 或者更像你：{alt_text}")
+            lines.append(f"- 💛 给你的话：{emotion}")
 
         if saving_text or deal_text:
             bits = [b for b in (saving_text, deal_text) if b]
@@ -428,46 +485,57 @@ def do_reading(
             "affinity": item.get("affinity") or 0,
             "affinity_why": pref_why,
             "message": emotion,
+            "sense": fine[0] if fine else "",
+            "whisper": fine[1] if len(fine) > 1 else "",
+            "closer": closer,
         })
 
-    # 省钱小结：把所有能省的钱收个口
+    # 省钱小结：把所有能省的钱收个口（lean 模式只留图里那一张小票，不再复述）
     combo_note = mcp_client.combo_coupon_note(profile, period)
     claim_note = mcp_client.claimable_hint(profile)
-    if saving_lines or claim_note:
+    if lean:
+        # 精简收尾：重心全部压在下一步操作上
         lines.append("\n---\n")
-        lines.append("## 🧾 今天这样买更省\n")
-        lines.extend(saving_lines)
-        if total_saving >= 0.5:
-            lines.append(f"\n**合计可省约 ¥{_fmt_price(total_saving)[1:]}**（券以结算页实际可用为准）")
-        combo_count = sum(1 for c in cards_block if c.get("form") in ("combo", "share"))
-        if combo_count:
-            lines.append(
-                f"> 这 {len(cards_block)} 张牌里给你配了 {combo_count} 份套餐："
-                "套餐自带的立减和满减券可以叠着用，比自己一样样点更省。"
-            )
-        if claim_note:
-            lines.append(f"> {claim_note}")
-        if combo_note:
-            lines.append(f"> {combo_note}")
+        if spread_key == "choice":
+            lines.append("三道菜都摆在牌上了。跟着第一眼心动的那一个走——通常那就是你真正想要的。")
+        lines.append("👉 回「**就它**」，我帮你核对实时价格并下单——付款链接你自己打开，钱我不碰。")
+        lines.append("\n*餐品供应与价格以麦当劳官方实时为准。*")
+    else:
+        if saving_lines or claim_note:
+            lines.append("\n---\n")
+            lines.append("## 🧾 今天这样买更省\n")
+            lines.extend(saving_lines)
+            if total_saving >= 0.5:
+                lines.append(f"\n**合计可省约 ¥{_fmt_price(total_saving)[1:]}**（券以结算页实际可用为准）")
+            combo_count = sum(1 for c in cards_block if c.get("form") in ("combo", "share"))
+            if combo_count:
+                lines.append(
+                    f"> 这 {len(cards_block)} 张牌里给你配了 {combo_count} 份套餐："
+                    "套餐自带的立减和满减券可以叠着用，比自己一样样点更省。"
+                )
+            if claim_note:
+                lines.append(f"> {claim_note}")
+            if combo_note:
+                lines.append(f"> {combo_note}")
 
-    # 三选一：把选择权交还用户
-    if spread_key == "choice":
+        # 三选一：把选择权交还用户
+        if spread_key == "choice":
+            lines.append("\n---\n")
+            lines.append(
+                "三道菜都是今天可以吃的，牌只是在帮你排序。"
+                "跟着第一眼心动的那一个走——通常那就是你真正想要的。"
+            )
+
+        # 结尾情绪寄语
         lines.append("\n---\n")
         lines.append(
-            "三道菜都是今天可以吃的，牌只是在帮你排序。"
-            "跟着第一眼心动的那一个走——通常那就是你真正想要的。"
+            "无论今天过得怎样，好好吃一顿，是你对自己最朴素的温柔。"
+            "以上由麦麦塔罗牌生成，餐品供应与价格以麦当劳官方实时为准。🥤"
         )
-
-    # 结尾情绪寄语
-    lines.append("\n---\n")
-    lines.append(
-        "无论今天过得怎样，好好吃一顿，是你对自己最朴素的温柔。"
-        "以上由麦麦塔罗牌生成，餐品供应与价格以麦当劳官方实时为准。🥤"
-    )
-    lines.append(
-        "\n💡 想直接吃这一份？回「就它」，我可以帮你核对实时价格并下单，"
-        "付款链接由你自己打开付款。"
-    )
+        lines.append(
+            "\n💡 想直接吃这一份？回「就它」，我可以帮你核对实时价格并下单，"
+            "付款链接由你自己打开付款。"
+        )
 
     markdown = "\n".join(lines)
     return {
@@ -614,7 +682,13 @@ def main() -> None:
                          "可由 mcd-mcp 连接器 query-meals 结果经 menu_from_connector.py 归一化生成")
     ap.add_argument("--no-cache", action="store_true", help="不使用本地门店/菜单缓存")
     ap.add_argument("--json", dest="json_out", default=None, help="把解读结果写成 JSON 文件")
-    ap.add_argument("--card-svg", default=None, help="生成塔罗牌面卡片（SVG 路径）")
+    ap.add_argument("--card-svg", default=None,
+                    help="生成塔罗牌面卡片（SVG 路径；多牌阵也只在一张画布上横排拼合）")
+    ap.add_argument("--inline", default=None,
+                    help="渲染可内联到对话框的牌面 SVG（宽 680，多张拼成一张）。"
+                         "写文件给路径；要直接打 stdout 就传 -")
+    ap.add_argument("--lean", action="store_true",
+                    help="精简文字：清单/形态/价格交给牌面图，文字只留解读与行动引导")
     ap.add_argument("--profile-file", default=None, help="口味画像 JSON（默认读 ~/.cache/mcd-tarot/profile.json）")
     ap.add_argument("--no-profile", action="store_true", help="不使用口味画像，只按牌意推荐")
     ap.add_argument("--single-only", action="store_true",
@@ -657,7 +731,8 @@ def main() -> None:
                                  combo_first=combo_first)
     else:
         result = do_reading(args.spread, args.date, args.mood, token, menu=menu,
-                            at=args.at, profile=profile, combo_first=combo_first)
+                            at=args.at, profile=profile, combo_first=combo_first,
+                            lean=args.lean)
 
     print(result["markdown"])
     print(f"\n[菜单来源] {result['menu_source']}　[口味画像] {'已使用' if result.get('profile_used') else '未使用'}")
@@ -671,6 +746,15 @@ def main() -> None:
         import tarot_card
         path = tarot_card.render(result, args.card_svg)
         print(f"[卡片] {path}")
+
+    if args.inline:
+        import tarot_card
+        svg = tarot_card.render_inline(result)
+        if args.inline == "-":
+            print(svg)
+        else:
+            Path(args.inline).write_text(svg, encoding="utf-8")
+            print(f"[内联卡片] {args.inline}")
 
 
 if __name__ == "__main__":

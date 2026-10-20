@@ -25,6 +25,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import re
 import subprocess
 import sys
 import urllib.request
@@ -59,6 +60,13 @@ ART_CX = ART_X + ART_W / 2
 
 # 小票
 TICKET_Y = 1028
+
+# 多牌阵排成一张时的牌间空隙
+SHEET_GAP = 28
+# 内联到对话框时的画布宽度（图片直接呈现在对话里，不靠附件卡片）
+INLINE_W = 680
+
+_ID_RE = re.compile(r'\bid="([A-Za-z][\w-]*)"')
 
 
 def _esc(s: object) -> str:
@@ -369,8 +377,50 @@ def _card_svg(card: Dict, meta: Dict, photo: bool = False) -> str:
 </svg>"""
 
 
+def _strip_svg(svg: str) -> str:
+    """去掉外层 <svg> 标签，只留内容（拼合到同一张画布时用）。"""
+    i = svg.find(">")
+    body = svg[i + 1:]
+    if body.rstrip().endswith("</svg>"):
+        body = body.rstrip()[: -len("</svg>")]
+    return body
+
+
+def _namespace(svg: str, suffix: str) -> str:
+    """给牌面内部的 id 加上后缀，避免多张牌拼在一张画布上时 id 撞车。"""
+    if not suffix:
+        return svg
+    out = svg
+    for ident in sorted(set(_ID_RE.findall(svg))):
+        out = out.replace(f'id="{ident}"', f'id="{ident}{suffix}"')
+        out = out.replace(f"url(#{ident})", f"url(#{ident}{suffix})")
+        out = out.replace(f'href="#{ident}"', f'href="#{ident}{suffix}"')
+    return out
+
+
+def _sheet_svg(cards: List[Dict], meta: Dict, photo: bool = False,
+               inline_width: Optional[int] = None) -> str:
+    """把 N 张牌横向拼成**一张**画布。inline_width 给定时整体等比缩放到该宽度。"""
+    n = len(cards)
+    total_w = W * n + SHEET_GAP * (n - 1)
+    k = (inline_width / total_w) if inline_width else 1.0
+    h = H * k
+    canvas_w = inline_width or total_w
+
+    parts = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{canvas_w:.0f}" '
+             f'height="{h:.0f}" viewBox="0 0 {canvas_w:.0f} {h:.0f}">',
+             f'<rect width="{canvas_w:.0f}" height="{h:.0f}" fill="{NIGHT_DEEP}"/>']
+    x = 0.0
+    for i, card in enumerate(cards):
+        body = _strip_svg(_namespace(_card_svg(card, meta, photo=photo), f"-c{i}"))
+        parts.append(f'<g transform="translate({x * k:.2f},0) scale({k:.6f})">{body}</g>')
+        x += W + SHEET_GAP
+    parts.append("</svg>")
+    return "".join(parts)
+
+
 def render(reading: Dict, out_path: str, photo: bool = False) -> str:
-    """渲染一张（或多张）塔罗牌，返回实际写入的路径。"""
+    """渲染牌面，**一次只产出一个文件**：单张出单张，多张则横向拼成一张。"""
     cards = reading.get("cards") or []
     if not cards:
         raise ValueError("没有可渲染的牌：reading 里缺少 cards")
@@ -382,24 +432,38 @@ def render(reading: Dict, out_path: str, photo: bool = False) -> str:
     }
     out = Path(out_path)
     out.parent.mkdir(parents=True, exist_ok=True)
+    svg = (_card_svg(cards[0], meta, photo=photo) if len(cards) == 1
+           else _sheet_svg(cards, meta, photo=photo))
+    out.write_text(svg, encoding="utf-8")
+    return str(out)
 
-    paths: List[str] = []
-    for i, card in enumerate(cards, 1):
-        target = out if len(cards) == 1 else out.with_name(f"{out.stem}-{i}{out.suffix or '.svg'}")
-        target.write_text(_card_svg(card, meta, photo=photo), encoding="utf-8")
-        paths.append(str(target))
 
-    return paths[0] if len(paths) == 1 else "、".join(paths)
+def render_inline(reading: Dict, photo: bool = False) -> str:
+    """返回可直接嵌进对话框的 SVG 字符串（宽 680，多张牌拼成一张）。
+
+    给 WorkBuddy 的 show_widget 用：图片直接呈现在对话里，不经过附件卡片。
+    """
+    cards = reading.get("cards") or []
+    if not cards:
+        raise ValueError("没有可渲染的牌：reading 里缺少 cards")
+    meta = {
+        "date": reading.get("date", ""),
+        "spread_name": reading.get("spread_name", ""),
+        "mood": reading.get("mood") or "",
+    }
+    return _sheet_svg(cards, meta, photo=photo, inline_width=INLINE_W)
 
 
 def render_png(reading: Dict, out_png: str, photo: bool = False, width: int = 750) -> str:
     """用本机 Chrome 无头模式把牌面渲染成 PNG（可选，慢约 1–2 秒）。
 
+    多牌阵同样只出一**张** PNG（横排拼合）。width 指整张图的宽度。
     没装 Chrome 时抛 RuntimeError，调用方可以只用 SVG。
     """
     import shutil
     import tempfile
 
+    n = len(reading.get("cards") or [1])
     chrome = None
     for cand in ("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
                  "/Applications/Chromium.app/Contents/MacOS/Chromium",
@@ -413,7 +477,8 @@ def render_png(reading: Dict, out_png: str, photo: bool = False, width: int = 75
     out = Path(out_png)
     svg_path = str(out.with_suffix(".svg"))
     render(reading, svg_path, photo=photo)
-    height = int(width * H / W)
+    sheet_w = W * n + SHEET_GAP * (n - 1)
+    height = int(width * H / sheet_w)
     tmp = Path(tempfile.mkdtemp()) / "card.png"
     subprocess.run(
         [chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--hide-scrollbars",
@@ -430,6 +495,14 @@ def render_png(reading: Dict, out_png: str, photo: bool = False, width: int = 75
 def main() -> None:
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     flags = {a for a in sys.argv[1:] if a.startswith("--")}
+    # --inline：把 SVG 直接打到 stdout，供 Agent 内联呈现在对话框里（不落盘）
+    if "--inline" in flags:
+        if len(args) != 1:
+            print(__doc__)
+            sys.exit(2)
+        reading = json.loads(Path(args[0]).read_text(encoding="utf-8"))
+        print(render_inline(reading, photo="--photo" in flags))
+        return
     if len(args) != 2:
         print(__doc__)
         sys.exit(2)

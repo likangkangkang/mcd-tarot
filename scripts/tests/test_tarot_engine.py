@@ -4,6 +4,7 @@
 """
 import os
 import sys
+import tempfile
 import traceback
 from datetime import datetime
 
@@ -722,6 +723,72 @@ def test_ingest_plain_items_still_works():
                     "items": [{"name": "汉堡", "quantity": 2}, {"name": "可乐", "quantity": 2}]}}
     got = combo_detail.ingest(raw, "C1")
     assert [(i["name"], i["qty"]) for i in got] == [("汉堡", 2), ("可乐", 2)], got
+
+
+def test_sense_layer_covers_all_78_cards():
+    """细腻文案层：78 张牌一张不缺（缺的会让解读退化回干巴巴的关键词）。"""
+    import tarot_sense
+    assert tarot_sense.all_cards_covered() == []
+
+
+def test_lean_text_skips_combo_detail_and_form_lines():
+    """lean 模式：清单/形态/价格交给牌面图，文字里不再罗列，只留解读与行动。"""
+    menu = [
+        {"name": "巨无霸三件套", "code": "1", "price": 37.0, "original_price": 50.5,
+         "category": "汉堡", "form": "combo"},
+        {"name": "巨无霸", "code": "2", "price": 26.0, "category": "汉堡", "form": "single"},
+    ]
+    r = tarot_engine.do_reading("today", "2026-10-20", menu=menu,
+                                at="2026-10-20 12:30", lean=True)
+    md = r["markdown"]
+    assert "📦 这一份里有" not in md
+    assert "🍱 形态" not in md
+    assert "今天这样买更省" not in md
+    assert "塔罗意涵" in md
+    assert "就它" in md
+    # 餐品名出现在落点句里，但没有被罗列成清单
+    assert "**巨无霸三件套**" in md
+    c = r["cards"][0]
+    assert c.get("sense") and c.get("whisper") and c.get("closer")
+
+
+def test_lean_vs_full_both_work():
+    """full 模式保持不变（明细、形态、用券都在）。"""
+    menu = [
+        {"name": "巨无霸三件套", "code": "1", "price": 37.0, "original_price": 50.5,
+         "category": "汉堡", "form": "combo"},
+        {"name": "巨无霸", "code": "2", "price": 26.0, "category": "汉堡", "form": "single"},
+    ]
+    r = tarot_engine.do_reading("today", "2026-10-20", menu=menu, at="2026-10-20 12:30")
+    assert "🍱 形态" in r["markdown"]
+
+
+def test_render_writes_single_file_for_multi_card():
+    """多牌阵也只生成一张图（横向拼合），不再吐 N 个文件。"""
+    import tarot_card
+    r = tarot_engine.do_reading("trinity", "2026-10-16", token=None, profile=False)
+    with tempfile.TemporaryDirectory() as td:
+        p = tarot_card.render(r, os.path.join(td, "card.svg"))
+        assert p.endswith("card.svg") and os.path.exists(p)
+        assert sorted(os.listdir(td)) == ["card.svg"]
+        s = open(p, encoding="utf-8").read()
+        assert s.count("</svg>") == 1  # 一张画布
+
+
+def test_render_inline_scales_sheet_to_680():
+    """内联版：固定 680 宽，多张牌拼在同一张画布上等比缩放。"""
+    import tarot_card
+    single = tarot_engine.do_reading("today", "2026-10-16", token=None, profile=False)
+    s = tarot_card.render_inline(single)
+    assert s.startswith("<svg") and 'viewBox="0 0 680 ' in s
+    triple = tarot_engine.do_reading("trinity", "2026-10-16", token=None, profile=False)
+    s3 = tarot_card.render_inline(triple)
+    assert 'viewBox="0 0 680 ' in s3
+    # 三张拼合后高度比单张矮（等比缩放，每张约 226 宽）
+    import re as _re
+    h1 = float(_re.search(r'viewBox="0 0 680 ([\d.]+)"', s).group(1))
+    h3 = float(_re.search(r'viewBox="0 0 680 ([\d.]+)"', s3).group(1))
+    assert h3 < h1
 
 
 if __name__ == "__main__":

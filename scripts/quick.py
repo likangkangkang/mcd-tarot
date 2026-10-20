@@ -25,7 +25,9 @@ quick.py 只用本地缓存做三件事：读门店 → 读当日菜单 → 读�
     python3 scripts/quick.py --spread trinity         # 身心灵三张
     python3 scripts/quick.py --mood "想被哄一下"       # 带心情
     python3 scripts/quick.py --at "2026-10-20 12:30"  # 指定点餐时间
-    python3 scripts/quick.py --svg card.svg           # 同时出牌面（默认不出）
+    python3 scripts/quick.py --svg card.svg           # 同时出牌面（多牌阵也只在一张画布上）
+    python3 scripts/quick.py --inline                 # 把牌面 SVG 打到 stdout（内联进对话框用）
+    python3 scripts/quick.py --lean                   # 精简文字（清单/形态/价格交给牌面图）
     python3 scripts/quick.py --json out.json          # 结构化结果
     python3 scripts/quick.py --allow-fallback         # 没缓存时用内置示例菜单
 
@@ -53,7 +55,11 @@ def main() -> None:
     ap.add_argument("--at", default=None, help='点餐时间 "YYYY-MM-DD HH:MM"，默认现在')
     ap.add_argument("--mood", default=None, help="今天的心情")
     ap.add_argument("--week", action="store_true", help="出本周餐单")
-    ap.add_argument("--svg", default=None, help="同时生成牌面 SVG 的路径")
+    ap.add_argument("--svg", default=None, help="同时生成牌面 SVG 的路径（多牌阵拼成一张）")
+    ap.add_argument("--inline", action="store_true",
+                    help="把牌面 SVG（宽 680，多张拼成一张）打到 stdout，供内联呈现在对话框")
+    ap.add_argument("--lean", action="store_true",
+                    help="精简文字：清单/形态/价格交给牌面图，文字只留解读与行动引导")
     ap.add_argument("--png", default=None, help="同时生成牌面 PNG（需要 Chrome，慢约 1–2 秒）")
     ap.add_argument("--photo", action="store_true", help="牌面小票旁附圆形餐品图（会联网下图）")
     ap.add_argument("--json", dest="json_out", default=None, help="把结果写成 JSON")
@@ -104,8 +110,14 @@ def main() -> None:
     else:
         result = tarot_engine.do_reading(
             args.spread, args.date, args.mood, menu=menu,
-            at=args.at, profile=prof, combo_first=combo_first)
+            at=args.at, profile=prof, combo_first=combo_first, lean=args.lean)
     mark("抽牌")
+
+    if args.inline:
+        import tarot_card
+        # 牌面在前、文字在后：先打 SVG，再打解读
+        print(tarot_card.render_inline(result, photo=args.photo))
+        print()
 
     print(result["markdown"])
 
