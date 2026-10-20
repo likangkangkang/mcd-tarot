@@ -53,6 +53,9 @@ _ROMAN = ["0", "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X",
 _RANK_ROMAN = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X",
                "XI", "XII", "XIII", "XIV"]
 
+# 牌面名称（牌冠处标题）；meta["title"] 可覆盖
+CARD_TITLE = "今日运势"
+
 # 画窗
 ART_X, ART_Y, ART_W, ART_H = 76, 176, 598, 556
 ART_CX = ART_X + ART_W / 2
@@ -281,6 +284,7 @@ def _card_svg(card: Dict, meta: Dict, photo: bool = False) -> str:
                 f'stroke-opacity="0.6" stroke-width="1.2"/>'
             )
 
+    title = _esc(meta.get("title") or CARD_TITLE)
     return f"""<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" viewBox="0 0 {W} {H}">
 <defs>
   <linearGradient id="night" x1="0.1" y1="0" x2="0.7" y2="1">
@@ -323,8 +327,8 @@ def _card_svg(card: Dict, meta: Dict, photo: bool = False) -> str:
 
 <!-- 牌冠：金拱门 + 编号 -->
 {A.arches(W / 2, 92, 64)}
-<text x="{W / 2}" y="120" font-size="13" fill="{MUTED}" text-anchor="middle"
-      letter-spacing="6" font-family="{FONT_SANS}">MCD TAROT</text>
+<text x="{W / 2 + 4}" y="120" font-size="16" fill="{MUTED}" text-anchor="middle"
+      letter-spacing="8" font-family="{FONT}">{title}</text>
 <text x="{W / 2}" y="162" font-size="27" fill="{GOLD}" text-anchor="middle"
       letter-spacing="7" font-family="{FONT}">{numeral}</text>
 
@@ -428,6 +432,7 @@ def render(reading: Dict, out_path: str, photo: bool = False) -> str:
         "date": reading.get("date", ""),
         "spread_name": reading.get("spread_name", ""),
         "mood": reading.get("mood") or "",
+        "title": reading.get("title") or "",
     }
     out = Path(out_path)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -449,6 +454,7 @@ def render_inline(reading: Dict, photo: bool = False) -> str:
         "date": reading.get("date", ""),
         "spread_name": reading.get("spread_name", ""),
         "mood": reading.get("mood") or "",
+        "title": reading.get("title") or "",
     }
     return _sheet_svg(cards, meta, photo=photo, inline_width=INLINE_W)
 
