@@ -247,6 +247,18 @@ def _card_svg(card: Dict, meta: Dict, photo: bool = False) -> str:
             f'fill="{CREAM}" text-anchor="middle">{_esc(label)}</text>'
         )
 
+    # 套餐在小票上补一行「里面装了什么」：光看「三件套」不知道点了啥
+    detail = str(card.get("combo_detail") or "")
+    detail_line = ""
+    if detail:
+        if len(detail) > 30:
+            detail = detail[:29] + "…"
+        detail_line = (
+            f'<text x="{W / 2}" y="{TICKET_Y + 78}" font-size="12.5" fill="{MUTED}" '
+            f'fill-opacity="0.85" text-anchor="middle" font-family="{FONT_SANS}">'
+            f'内有 {_esc(detail)}</text>'
+        )
+
     # 小票左侧：可选的餐品照片章（默认不出现，保持塔罗感）
     medallion = ""
     if photo:
@@ -341,12 +353,13 @@ def _card_svg(card: Dict, meta: Dict, photo: bool = False) -> str:
 {quote}
 
 <!-- 小票 -->
-<rect x="{W / 2 - 216}" y="{TICKET_Y}" width="432" height="86" rx="4" fill="#000000"
+<rect x="{W / 2 - 216}" y="{TICKET_Y}" width="432" height="{96 if detail_line else 86}" rx="4" fill="#000000"
       fill-opacity="0.28" stroke="{GOLD}" stroke-opacity="0.38"/>
 <text x="{W / 2}" y="{TICKET_Y + 28}" font-size="13" fill="{MUTED}" text-anchor="middle"
       letter-spacing="5" font-family="{FONT_SANS}">今天麦麦请你吃</text>
-<text x="{W / 2}" y="{TICKET_Y + 60}" font-size="24" fill="{GOLD}" text-anchor="middle"
+<text x="{W / 2}" y="{TICKET_Y + 58}" font-size="24" fill="{GOLD}" text-anchor="middle"
       font-family="{FONT}">{_esc(food)}  ·  {_esc(price)}{("  ·  " + _esc(form_label)) if form_label else ""}</text>
+{detail_line}
 {saving_badge}
 {medallion}
 

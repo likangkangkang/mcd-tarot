@@ -31,6 +31,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import combo_detail  # 同目录模块：套餐明细
+
 CACHE = Path(os.environ.get("MCD_TAROT_CACHE") or (Path.home() / ".cache" / "mcd-tarot"))
 ORDERS = CACHE / "orders.json"
 
@@ -67,8 +69,18 @@ def _fmt(v: Optional[float]) -> str:
     return f"¥{v:.2f}".rstrip("0").rstrip(".") if v != int(v) else f"¥{int(v)}"
 
 
+def _menu_list(store: str) -> List[Dict[str, Any]]:
+    """当日菜单（用于查套餐明细）。"""
+    try:
+        import cache  # 同目录模块
+        return cache.load_menu(store) or cache.latest_menu() or []
+    except Exception:  # noqa: BLE001
+        return []
+
+
 def cmd_draft(args: argparse.Namespace) -> None:
     lookup = _menu_lookup(args.store)
+    menu = _menu_list(args.store)
     items: List[Dict[str, Any]] = []
     total = 0.0
     unknown = []
@@ -85,9 +97,12 @@ def cmd_draft(args: argparse.Namespace) -> None:
                           "price": None, "original_price": None})
             continue
         price = info.get("price")
+        # 套餐把里面装了什么写清楚，下单前才知道自己点了啥
+        detail = combo_detail.describe(info, menu)
         items.append({"code": code, "name": info.get("name", ""), "qty": qty,
                       "price": price, "original_price": info.get("original_price"),
-                      "form": info.get("form", "")})
+                      "form": info.get("form", ""),
+                      "combo_detail": (detail or {}).get("text") or ""})
         if price is not None:
             total += float(price) * qty
 
@@ -114,6 +129,8 @@ def cmd_draft(args: argparse.Namespace) -> None:
         orig = it.get("original_price")
         extra = f"（原价 {_fmt(orig)}）" if orig and it.get("price") and orig > it["price"] else ""
         lines.append(f"- {it['name']} ×{it['qty']}　{price}{extra}")
+        if it.get("combo_detail"):
+            lines.append(f"  - 📦 内含：{it['combo_detail']}")
     if total:
         lines.append(f"\n**预估合计：{_fmt(total)}**（最终以 calculate-price 实时计算为准）")
     lines.append("\n确认无误请回复「确认下单」；要改数量或餐品直接说。"

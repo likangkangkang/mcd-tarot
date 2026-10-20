@@ -41,7 +41,7 @@ git add -A && git commit -m "..." && git push
 ## 自检
 ```bash
 cd ~/.workbuddy/skills/mcd-tarot
-python3 scripts/tests/test_tarot_engine.py     # 39 项单元测试
+python3 scripts/tests/test_tarot_engine.py     # 47 项单元测试
 python3 scripts/selfcheck.py                   # 价格覆盖 / 误映射 / 重复牌
 python3 scripts/profile.py show                # 看画像学到了什么
 python3 scripts/tarot_engine.py --spread today  # 离线抽牌（无真实菜单时用示例菜单）

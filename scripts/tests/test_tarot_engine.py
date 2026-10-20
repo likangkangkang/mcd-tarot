@@ -566,6 +566,131 @@ def test_combo_first_mostly_combo_when_menu_rich():
     assert hit / total >= 0.85, f"套餐占比只有 {hit / total:.0%}"
 
 
+def test_combo_detail_guess_writes_items_and_qty():
+    """三件套要写出「主品 + 薯条 + 可乐」和各自的数量。"""
+    import combo_detail
+    menu = [{"name": "麦辣鸡腿汉堡", "code": "1", "price": 23.0, "form": "single"},
+            {"name": "薯条(中)", "code": "2", "price": 12.0, "form": "single"},
+            {"name": "可乐(中)", "code": "3", "price": 10.0, "form": "single"}]
+    d = combo_detail.describe({"name": "麦辣鸡腿汉堡三件套", "form": "combo"}, menu)
+    assert d and d["items"], "套餐必须有明细"
+    names = [it["name"] for it in d["items"]]
+    assert "麦辣鸡腿汉堡" in names, names
+    assert any("薯条" in n for n in names), names
+    assert any("可乐" in n for n in names), names
+    assert all(it["qty"] >= 1 for it in d["items"])
+    assert "×1" in d["text"] and "｜" in d["text"], d["text"]
+
+
+def test_combo_detail_prefers_real_menu_names():
+    """配餐要用菜单里真实存在的名字，而不是凭空编。"""
+    import combo_detail
+    menu = [{"name": "板烧鸡腿堡", "code": "1", "price": 22.0, "form": "single"},
+            {"name": "薯条(大)", "code": "2", "price": 14.0, "form": "single"},
+            {"name": "零度可乐(中)", "code": "3", "price": 10.0, "form": "single"}]
+    d = combo_detail.describe({"name": "板烧鸡腿堡四件套", "form": "combo"}, menu)
+    names = [it["name"] for it in d["items"]]
+    assert "薯条(大)" in names and "零度可乐(中)" in names, names
+
+
+def test_combo_detail_single_item_gets_nothing():
+    """单品不硬凑明细（「薯条(中)」就是一份薯条）。"""
+    import combo_detail
+    menu = [{"name": "薯条(中)", "code": "2", "price": 12.0, "form": "single"}]
+    assert combo_detail.describe({"name": "薯条(中)", "form": "single"}, menu) is None
+
+
+def test_combo_detail_uses_official_items_first():
+    """菜单自带 / 导入过的官方明细优先于推断。"""
+    import combo_detail
+    item = {"name": "麦辣鸡腿汉堡三件套", "form": "combo",
+            "items": [{"name": "麦辣鸡腿汉堡", "qty": 1},
+                      {"name": "脆薯饼", "qty": 2}]}
+    d = combo_detail.describe(item, [])
+    assert d["source"] == "menu" and d["exact"] is True
+    assert [it["name"] for it in d["items"]] == ["麦辣鸡腿汉堡", "脆薯饼"]
+    assert d["items"][1]["qty"] == 2
+
+
+def test_combo_detail_ingest_to_cache():
+    """query-meal-detail 的返回能导入缓存，之后直接读到官方明细。"""
+    import tempfile
+    import combo_detail
+    raw = {"data": {"name": "麦辣鸡腿汉堡三件套",
+                    "items": [{"name": "麦辣鸡腿汉堡", "qty": 1},
+                              {"name": "薯条(中)", "qty": 1},
+                              {"name": "可乐(中)", "qty": 1}]}}
+    with tempfile.TemporaryDirectory() as td:
+        old = os.environ.get("MCD_TAROT_CACHE")
+        os.environ["MCD_TAROT_CACHE"] = td
+        try:
+            got = combo_detail.ingest(raw)
+            assert len(got) == 3, got
+            d = combo_detail.describe({"name": "麦辣鸡腿汉堡三件套", "form": "combo"}, [])
+            assert d["source"] == "cache" and "薯条(中)" in d["text"], d
+        finally:
+            if old is None:
+                os.environ.pop("MCD_TAROT_CACHE", None)
+            else:
+                os.environ["MCD_TAROT_CACHE"] = old
+
+
+def test_reading_shows_combo_contents_under_name():
+    """解读里，套餐名下面要紧跟一行「这一份里有 …」。"""
+    menu = [
+        {"name": "麦辣鸡腿汉堡", "code": "1", "price": 23.0, "category": "鸡肉汉堡/卷", "form": "single"},
+        {"name": "麦辣鸡腿汉堡三件套", "code": "2", "price": 33.0, "original_price": 44.0,
+         "category": "鸡肉汉堡/卷", "form": "combo"},
+        {"name": "薯条(中)", "code": "3", "price": 12.0, "category": "小食", "form": "single"},
+        {"name": "可乐(中)", "code": "4", "price": 10.0, "category": "饮品", "form": "single"},
+    ]
+    hit = 0
+    for day in (1, 5, 9, 13):
+        r = tarot_engine.do_reading("today", f"2026-12-{day:02d}", menu=menu,
+                                    at=f"2026-12-{day:02d} 12:30", profile=None)
+        card = r["cards"][0]
+        if card["form"] == "combo":
+            hit += 1
+            assert card["combo_detail"], f"套餐缺明细：{card['food']}"
+            assert "这一份里有" in r["markdown"]
+            assert card["combo_items"], card
+    assert hit, "这份菜单下应该至少抽到一次套餐"
+
+
+def test_week_reading_lists_combo_contents():
+    """本周餐单也要交代套餐里装了什么。"""
+    menu = [
+        {"name": "巨无霸", "code": "1", "price": 26.0, "category": "汉堡", "form": "single"},
+        {"name": "巨无霸三件套", "code": "2", "price": 37.0, "original_price": 50.5,
+         "category": "汉堡", "form": "combo"},
+        {"name": "薯条(中)", "code": "3", "price": 12.0, "category": "小食", "form": "single"},
+        {"name": "可乐(中)", "code": "4", "price": 10.0, "category": "饮品", "form": "single"},
+    ]
+    r = tarot_engine.do_week_reading("2026-12-07", menu=menu, profile=None)
+    assert "这周套餐里都装了什么" in r["markdown"]
+    assert any(d.get("combo_detail") for d in r["days"]), r["days"]
+
+
+def test_card_face_prints_combo_contents():
+    """牌面小票上要印出套餐内容（不只是名字）。"""
+    import tarot_card
+    reading = tarot_engine.do_reading("today", "2026-12-01", menu=[
+        {"name": "麦辣鸡腿汉堡", "code": "1", "price": 23.0, "category": "鸡肉汉堡/卷", "form": "single"},
+        {"name": "麦辣鸡腿汉堡三件套", "code": "2", "price": 33.0, "original_price": 44.0,
+         "category": "鸡肉汉堡/卷", "form": "combo"},
+        {"name": "薯条(中)", "code": "3", "price": 12.0, "category": "小食", "form": "single"},
+        {"name": "可乐(中)", "code": "4", "price": 10.0, "category": "饮品", "form": "single"},
+    ], at="2026-12-01 12:30", profile=None)
+    cards = reading["cards"]
+    if cards[0]["form"] != "combo":
+        return  # 这天没抽到套餐就跳过（不构成失败）
+    out = os.path.join(os.path.dirname(__file__), "_tmp_combo_card.svg")
+    tarot_card.render(reading, out)
+    svg = open(out, encoding="utf-8").read()
+    os.remove(out)
+    assert "内有" in svg, "牌面没有印套餐内容"
+
+
 if __name__ == "__main__":
     mod = sys.modules[__name__]
     fns = [getattr(mod, n) for n in dir(mod) if n.startswith("test_")]

@@ -29,6 +29,7 @@ from typing import Dict, List, Optional, Tuple
 
 import tarot_deck
 import mcp_client
+import combo_detail
 from mcp_client import get_menu, resolve_item
 
 # 牌阵定义：key -> (中文名, 位置标签列表)
@@ -154,7 +155,8 @@ def _portion_note(card: Dict, item: Dict, period: Optional[Dict[str, str]],
     """
     base = tarot_deck.portion_of(card)
     label = tarot_deck.PORTION_LABEL.get(base, "单品")
-    form = item.get("form") or ("combo" in str(item.get("name")) and "combo" or "single")
+    # 菜单没写 form 字段时按名字判断（与 do_reading 保持一致），别让文案自相矛盾
+    form = item.get("form") or mcp_client._form(item)
     form_cn = _FORM_CN.get(form, "单品")
     pname = period["name"] if period else ""
     key = (period or {}).get("key")
@@ -317,9 +319,12 @@ def do_reading(
         price = _fmt_price(item.get("price"))
         price_text = f"（{price}）" if price else ""
         note = _portion_note(card, item, period, profile, upgraded=upgraded)
-        form = item.get("form") or "single"
+        # 菜单没写 form（内置示例菜单）时按名字判断，别把套餐当成单品
+        form = item.get("form") or mcp_client._form(item)
         form_label = {"combo": "套餐", "share": "分享装", "light": "轻食", "single": "单品"}.get(form, "单品")
         orig = item.get("original_price")
+        # 套餐要把里面装了什么写清楚：光看「三件套」不知道自己点了啥
+        detail = combo_detail.describe(item, menu) if form in ("combo", "share") else None
         saving_text = ""
         card_saving = 0.0
         if orig is not None and item.get("price") is not None:
@@ -376,6 +381,8 @@ def do_reading(
         lines.append(f"**{card['name_cn']} · {card['name_en']}**（{ori_tag}）")
         lines.append(f"- 塔罗意涵：{meaning}")
         lines.append(f"- 🍔 麦麦指引：**{name}**{price_text}")
+        if detail:
+            lines.append(f"  - 📦 这一份里有：{detail['text']}（{detail['note']}）")
         lines.append(f"- 🍱 形态：{form_label} · {note}")
         if pref_why:
             lines.append(f"- 🧠 合你口味：{pref_why}")
@@ -406,6 +413,10 @@ def do_reading(
             "image": item.get("image") or "",
             "form": form,
             "form_label": form_label,
+            "combo_items": (detail or {}).get("items") or [],
+            "combo_detail": (detail or {}).get("text") or "",
+            "combo_detail_source": (detail or {}).get("source") or "",
+            "combo_detail_note": (detail or {}).get("note") or "",
             "portion": prefer,
             "portion_note": note,
             "saving": saving_text,
@@ -537,6 +548,7 @@ def do_week_reading(
             price_cell += f" 🎟省¥{_fmt_price(deal['saving'])[1:]}"
         message = card["emotion_rev"] if orientation == "rev" else card["emotion_up"]
         ori = "逆位" if orientation == "rev" else "正位"
+        detail = combo_detail.describe(item, menu) if mcp_client._form(item) in ("combo", "share") else None
         lines.append(
             f"| {d.strftime('%m-%d')} {WEEKDAYS[i]} | {card['name_cn']} · {ori} | "
             f"**{name}**{' ' + price if price else ''} | {_short_message(message)} |"
@@ -549,8 +561,20 @@ def do_week_reading(
             "orientation": ori,
             "food": name,
             "price": price,
+            "form": mcp_client._form(item),
+            "combo_items": (detail or {}).get("items") or [],
+            "combo_detail": (detail or {}).get("text") or "",
+            "combo_detail_source": (detail or {}).get("source") or "",
+            "combo_detail_note": (detail or {}).get("note") or "",
             "message": message,
         })
+
+    bundle_lines = [f"- {x['weekday']} · **{x['food']}**：{x['combo_detail']}"
+                    for x in days if x.get("combo_detail")]
+    if bundle_lines:
+        lines.append("\n**这周套餐里都装了什么**（以结算页实际配置为准）\n")
+        lines.extend(bundle_lines)
+        lines.append("")
 
     lines.append("\n---\n")
     lines.append(

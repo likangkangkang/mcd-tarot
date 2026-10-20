@@ -170,7 +170,7 @@ def get_menu(token: Optional[str] = None) -> List[Dict[str, Any]]:
 # 非餐品（周边 / 贴纸 / 酱料）不参与映射，避免「薯条」命中「薯条脆卜卜毛绒周边」
 NON_FOOD_PATTERN = re.compile(r"周边|贴纸|毛绒|捶|痒挠|贴$|酱$")
 # 套餐类：单品的语义更准，只有在没有单品可选、或牌的关键词本身就指向套餐时才用
-BUNDLE_PATTERN = re.compile(r"套餐|三件套|双人|全家桶|组合|桶")
+BUNDLE_PATTERN = re.compile(r"套餐|件套|双人|全家|分享|桶|组合|套装|全餐|乐园餐|欢乐餐|随心配|任选|1\s*\+\s*1")
 # 「自选组合」：随心配 / 1+1 / 任选，能装任意单品，是万能套餐兜底
 ANY_COMBO_PATTERN = re.compile(r"随心配|1\s*\+\s*1|任选|自选|自由搭")
 
