@@ -8,6 +8,26 @@
 
 > 牌面由 `scripts/tarot_art.py` + `scripts/tarot_card.py` 纯代码绘制：深靛夜空、旧金双线框、拱形画窗、罗马数字、月相与星点。主画面把一份汉堡画成**披着生菜披风、头顶光环、张臂托着法器**的圣像；大阿卡纳各有自己的法器与天空（愚者的太阳、正义的天平与餐刀、世界的花环），小阿卡纳则把薯条/可乐/餐刀/汉堡币按张数串成一道半圆光环。逆位时圣像整体倒置。**不再把商品照贴进画框**，需要时用 `--photo` 在底部小票旁加一枚圆形餐品章。
 
+## ⚡ 一句话安装（可直接转发）
+
+> **装上我，你就能预测自己的今日运势。** 🃏🍔
+> 每天抽一张麦麦塔罗牌，牌面是一幅把汉堡画成圣像的塔罗画，落点是你今天该吃的那一份。
+
+粘贴到终端，回车：
+
+```bash
+git clone https://github.com/likangkangkang/mcd-tarot.git ~/.workbuddy/skills/mcd-tarot
+```
+
+Windows（PowerShell）用这一条：
+
+```powershell
+git clone https://github.com/likangkangkang/mcd-tarot.git "$HOME\.workbuddy\skills\mcd-tarot"
+```
+
+然后在 WorkBuddy 里启用【连接器】`mcd-mcp`（模板见 `assets/mcp-config.example.json`），
+对它说一句「**今日运势**」就行——它会先自我介绍、问你要不要开始，你回「**是**」就够了。
+
 ---
 
 ## 它解决什么
@@ -149,4 +169,3 @@ python3 scripts/profile.py clear             # 用户说「别记我」
 | [`references/INSTALL.md`](references/INSTALL.md) | 安装、单一真源与更新方式 |
 | [`references/MCP_INTEGRATION.md`](references/MCP_INTEGRATION.md) | MCP 工具与调用流程 |
 | [`references/sample_reading.md`](references/sample_reading.md) | 一份完整解读示例 |
-| [`references/CONTEST_DECLARATION.md`](references/CONTEST_DECLARATION.md) | 参赛声明 |
