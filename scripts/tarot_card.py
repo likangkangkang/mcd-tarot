@@ -157,6 +157,24 @@ def _card_svg(card: Dict, meta: Dict) -> str:
     badge_stroke = RED if reversed_ else GOLD
     badge_text = CREAM if reversed_ else GOLD
 
+    # 有券/有立省时，在小票右上角挂一个克制的「省 ¥X」角标
+    saving = card.get("saving_value") or 0
+    try:
+        saving_f = float(saving)
+    except (TypeError, ValueError):
+        saving_f = 0.0
+    if saving_f >= 3:
+        label = f"省 ¥{saving_f:.1f}".replace(".0", "")
+        badge_w = 26 + len(label) * 13
+        saving_badge = (
+            f'<rect x="{W / 2 + 210 - badge_w - 10}" y="1010" width="{badge_w}" height="30" '
+            f'rx="15" fill="{RED}" fill-opacity="0.9"/>'
+            f'<text x="{W / 2 + 210 - badge_w / 2 - 10}" y="1031" font-size="17" fill="{CREAM}" '
+            f'text-anchor="middle">{_esc(label)}</text>'
+        )
+    else:
+        saving_badge = ""
+
     return f"""<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" viewBox="0 0 {W} {H}">
 <defs>
   <linearGradient id="bg" x1="0" y1="0" x2="0.6" y2="1">
@@ -222,6 +240,7 @@ def _card_svg(card: Dict, meta: Dict) -> str:
 <rect x="{W / 2 - 210}" y="1032" width="420" height="74" rx="12" fill="#000000" fill-opacity="0.18" stroke="{GOLD}" stroke-opacity="0.45"/>
 <text x="{W / 2}" y="1068" font-size="19" fill="{MUTED}" text-anchor="middle" letter-spacing="3">今天麦麦请你吃</text>
 <text x="{W / 2}" y="1096" font-size="25" fill="{GOLD}" text-anchor="middle">{_esc(food)}  ·  {_esc(price)}{("  ·  " + _esc(form_label)) if form_label else ""}</text>
+{saving_badge}
 
 <!-- 页脚 -->
 <text x="{W / 2}" y="1140" font-size="15" fill="{MUTED}" text-anchor="middle" opacity="0.8">{_esc(meta.get("date", ""))} · 餐品与价格以麦当劳官方实时为准</text>

@@ -92,7 +92,7 @@ MAJOR_ARCANA: List[Dict] = [
         "suit": None, "rank": None,
         "upright": "连接、选择、分享",
         "reversed": "纠结、疏离",
-        "mcd_keywords": ["新地", "限定风味麦旋风"],
+        "mcd_keywords": ["限定风味麦旋风", "麦旋风", "新地"],
         "emotion_up": "好东西要有人一起才完整。今天给自己点一份甜的，也可以顺手问一句：要不要一起？",
         "emotion_rev": "不是所有的选择都要立刻做。先和自己的心待一会儿。",
     },

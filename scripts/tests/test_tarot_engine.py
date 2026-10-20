@@ -293,6 +293,112 @@ def test_order_draft_card():
                 os.environ["MCD_TAROT_CACHE"] = old
 
 
+# ---------------------------------------------------------------------------
+# 口味画像 + 优惠感知推荐
+# ---------------------------------------------------------------------------
+_SAMPLE_ORDERS = {
+    "data": {"list": [
+        {"createTime": "2026-10-16 09:03:42", "storeCode": "1", "realTotalAmount": "12.9",
+         "orderProductList": [{"productName": "原味板烧鸡腿炒双蛋堡组合",
+                               "comboItemList": [{"name": "优品豆浆小杯"}]}]},
+        {"createTime": "2026-10-13 09:18:57", "storeCode": "1", "realTotalAmount": "12.9",
+         "orderProductList": [{"productName": "原味板烧鸡腿炒双蛋堡组合",
+                               "comboItemList": [{"name": "优品豆浆小杯"}]}]},
+        {"createTime": "2026-09-24 08:31:45", "storeCode": "1", "realTotalAmount": "12.9",
+         "orderProductList": [{"productName": "原味板烧鸡腿炒双蛋堡组合",
+                               "comboItemList": [{"name": "优品豆浆小杯"}]}]},
+        {"createTime": "2026-10-16 18:31:59", "storeCode": "1", "realTotalAmount": "38",
+         "orderProductList": [{"productName": "心形薯饼5块"},
+                              {"productName": "韩式辣椒黄油风味酱"}]},
+    ]}
+}
+_SAMPLE_AVAILABLE = """- 优惠券标题：11.9元麦辣鸡腿堡
+  状态：可领取
+- 优惠券标题：免费脆薯饼
+  状态：可领取
+"""
+_SAMPLE_WALLET = """## 麦咖啡™美式中杯
+- **优惠**: ¥0 (用券价格)
+"""
+
+_MENU = [
+    {"name": "麦辣鸡腿汉堡", "code": "1", "price": 23.0, "category": "鸡肉汉堡", "form": "single"},
+    {"name": "板烧鸡腿堡", "code": "2", "price": 24.0, "category": "鸡肉汉堡", "form": "single"},
+    {"name": "脆薯饼", "code": "3", "price": 8.0, "category": "小食", "form": "single"},
+    {"name": "麦咖啡™美式", "code": "4", "price": 9.9, "category": "麦咖啡", "form": "single"},
+    {"name": "巨无霸", "code": "5", "price": 26.0, "category": "牛肉汉堡", "form": "single"},
+]
+
+
+def _sample_profile():
+    import profile as profile_mod
+    return profile_mod.build(orders=_SAMPLE_ORDERS, wallet=_SAMPLE_WALLET,
+                             available=_SAMPLE_AVAILABLE)
+
+
+def test_profile_learns_taste_and_habit():
+    """画像要能学到：常点板烧、偏爱鸡肉、早餐习惯点组合、酱料不算口味。"""
+    prof = _sample_profile()
+    names = [f["name"] for f in prof["favorites"]]
+    assert "原味板烧鸡腿炒双蛋堡组合" in names, names
+    assert not any("酱" in n for n in names), f"酱料不该进画像: {names}"
+    assert prof["favorites"][0]["count"] == 3, prof["favorites"][0]
+    assert prof["traits"]["chicken"] >= 0.6, prof["traits"]
+    assert prof["periods"]["breakfast"]["top_form"] == "combo", prof["periods"]
+
+
+def test_affinity_recognizes_familiar_item():
+    """没点过「板烧鸡腿堡」，但点过「原味板烧鸡腿炒双蛋堡组合」，应识别为同一口味。"""
+    prof = _sample_profile()
+    a = mcp_client.affinity({"name": "板烧鸡腿堡", "price": 24}, prof)
+    b = mcp_client.affinity({"name": "巨无霸", "price": 26}, prof)
+    assert a["score"] > b["score"], (a, b)
+    assert a["score"] >= 1.5, a
+
+
+def test_deal_matches_coupon_by_partial_name():
+    """券名和菜名不完全一致（麦咖啡™美式中杯 vs 麦咖啡™美式）也要能匹配上。"""
+    prof = _sample_profile()
+    deal = mcp_client.deal_for({"name": "麦咖啡™美式", "price": 9.9}, prof)
+    assert deal and deal["free"] and deal["saving"] == 9.9, deal
+    deal2 = mcp_client.deal_for({"name": "麦辣鸡腿汉堡", "price": 23.0}, prof)
+    assert deal2 and deal2["saving"] == 11.1, deal2
+    assert mcp_client.deal_for({"name": "巨无霸", "price": 26.0}, prof) is None
+
+
+def test_resolve_prefers_familiar_alternative():
+    """牌指向炸鸡类时，在同类里优先你更熟悉的板烧；并给出券/偏好标注。"""
+    card = {"id": 0, "name_cn": "愚者", "mcd_keywords": ["麦辣鸡腿汉堡"],
+            "mcd_category": "鸡肉汉堡"}
+    prof = _sample_profile()
+    item = mcp_client.resolve_item(card, _MENU, profile=prof, prefer_form="single")
+    assert item["name"] == "麦辣鸡腿汉堡", item["name"]  # 牌面优先，不被画像推翻
+    assert item["deal"] and item["deal"]["saving"] == 11.1, item.get("deal")
+    alt = mcp_client.alternative_for(card, item, _MENU, prof, prefer_form="single")
+    assert alt and alt["name"] == "板烧鸡腿堡", alt
+
+
+def test_reading_shows_saving_and_taste():
+    """带画像的解读应出现「合你口味」「用券」「更省」这类行。"""
+    prof = _sample_profile()
+    r = tarot_engine.do_reading("trinity", "2026-10-20", "想省钱", menu=_MENU,
+                                at="2026-10-20 15:00", profile=prof)
+    assert r["profile_used"] is True
+    assert r["cards"] and "price_raw" in r["cards"][0]
+    md = r["markdown"]
+    assert ("用券" in md) or ("更划算" in md) or ("合你口味" in md) or ("或者更像你" in md), md
+    # 有可领券时必须给出提示，不能只字不提
+    assert "今天这样买更省" in md and "免费脆薯饼" in md, md
+
+
+def test_reading_without_profile_still_works():
+    """没有画像时必须退化到纯牌意推荐，不能报错。"""
+    r = tarot_engine.do_reading("today", "2026-10-20", menu=_MENU,
+                                at="2026-10-20 12:30", profile=False)
+    assert r["cards"], r
+    assert r["profile_used"] is False
+
+
 if __name__ == "__main__":
     mod = sys.modules[__name__]
     fns = [getattr(mod, n) for n in dir(mod) if n.startswith("test_")]

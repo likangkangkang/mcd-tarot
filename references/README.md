@@ -64,7 +64,8 @@ mcd-tarot/
 ├── scripts/
 │   ├── tarot_deck.py        # 78 张牌组 + 麦当劳映射 + 情绪寄语（可离线单测）
 │   ├── tarot_engine.py      # 引擎：确定性抽签 / 牌阵 / 三选一 / 本周餐单 / 卡片
-│   ├── mcp_client.py        # 仅标准库的 mcd-mcp 客户端（真实菜单优先，回退示例）
+│   ├── mcp_client.py        # 仅标准库的 mcd-mcp 客户端 + 口味/券匹配打分
+│   ├── profile.py           # 口味画像：历史订单 → 常点/口味/时段习惯；券包 → 优惠索引
 │   ├── menu_from_connector.py  # query-meals 返回 → 引擎菜单（可写缓存）
 │   ├── cache.py             # 门店记忆 + 当日菜单缓存
 │   ├── selfcheck.py         # 换季自检（价格覆盖 / 误映射 / 重复牌）
@@ -73,7 +74,7 @@ mcd-tarot/
 │   └── tests/               # 单元测试
 ├── references/              # README / MCP 集成说明 / 示例解读 / 安装维护 / 参赛材料
 ├── assets/                  # 连接器配置模板、环境变量示例、requirements
-└── .cache/                  # 运行时缓存（不入库）
+└── （运行时数据在 ~/.cache/mcd-tarot/：门店、当日菜单、口味画像、订单，不入库）
 ```
 
 ## 🍟 与麦当劳 MCP 的关系
@@ -82,7 +83,8 @@ mcd-tarot/
 
 ## 🔒 安全与合规
 - 仓库不含任何真实 Token / 密钥；配置一律使用 `${MCD_MCP_TOKEN}` 占位符（见 `mcp-config.example.json`）。
-- 仅读取菜单，**绝不下单、不碰地址/支付等写操作**。
+- 抽牌只读菜单与个人订单/券包；**下单只在用户明确要求时发生，付款永远由用户本人完成**，不代付、不索要验证码。
+- 口味画像只存在本机 `~/.cache/mcd-tarot/profile.json`，不上传、不入库，可随时 `profile.py clear`。
 - 作为麦当劳程序员节创意开发大赛参赛作品，遵循赛事规则与 `CONTEST_DECLARATION.md`。
 
 > ⚠️ 餐品、价格、供应状态以麦当劳官方实时结果为准；本输出仅供参考，不构成任何专业建议。

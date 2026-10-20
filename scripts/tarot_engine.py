@@ -90,12 +90,22 @@ def period_of(now: Optional[datetime] = None) -> Dict[str, str]:
             "prefer": "combo", "time": now.strftime("%H:%M")}
 
 
-def tuned_portion(card: Dict, period: Optional[Dict[str, str]]) -> str:
-    """把「牌意的份量倾向」和「时段」合成一个推荐形态。"""
+def tuned_portion(card: Dict, period: Optional[Dict[str, str]],
+                  profile: Optional[Dict] = None) -> str:
+    """把「牌意的份量倾向」+「时段」+「你在这个时段的实际习惯」合成推荐形态。
+
+    有画像且该时段样本足够时，以你的真实习惯为准：
+    你早餐一直点组合，就别硬推单品；你下午茶历来只买一样，也别塞套餐。
+    """
     base = tarot_deck.portion_of(card)
     if not period:
         return base
     key = period["key"]
+    learned = (((profile or {}).get("periods") or {}).get(key) or {}).get("top_form")
+    if learned == "combo":
+        return {"light": "single", "single": "combo", "combo": "combo", "share": "share"}[base]
+    if learned == "single":
+        return {"light": "light", "single": "single", "combo": "single", "share": "combo"}[base]
     if key in ("lunch", "dinner"):
         return {"light": "single", "single": "combo", "combo": "combo", "share": "share"}[base]
     if key in ("afternoon", "night"):
@@ -103,12 +113,17 @@ def tuned_portion(card: Dict, period: Optional[Dict[str, str]]) -> str:
     return {"light": "light", "single": "single", "combo": "single", "share": "combo"}[base]
 
 
-def _portion_note(card: Dict, item: Dict, period: Optional[Dict[str, str]]) -> str:
+def _portion_note(card: Dict, item: Dict, period: Optional[Dict[str, str]],
+                  profile: Optional[Dict] = None) -> str:
     """一句话解释「为什么给你配了这个形态」。"""
     base = tarot_deck.portion_of(card)
     label = tarot_deck.PORTION_LABEL.get(base, "单品")
     form = item.get("form") or ("combo" if "套餐" in str(item.get("name")) else "single")
     pname = period["name"] if period else ""
+    learned = (((profile or {}).get("periods") or {}).get((period or {}).get("key")) or {}).get("top_form")
+    if learned and form in ("combo", "single") and form == learned:
+        habit = "组合/套餐" if learned == "combo" else "单品"
+        return f"牌面偏「{label}」，你{pname}一向点{habit}，这样最顺手"
     if form == "combo":
         if period and period["key"] in ("lunch", "dinner"):
             return f"牌面偏「{label}」，{pname}配套餐更划算"
@@ -179,6 +194,7 @@ def do_reading(
     token: Optional[str] = None,
     menu: Optional[List[Dict]] = None,
     at: Optional[str] = None,
+    profile: Optional[Dict] = None,
 ) -> Dict:
     """生成一次完整解读，返回含 markdown 的字典。
 
@@ -186,6 +202,8 @@ def do_reading(
     mcd-mcp 连接器的 query-meals 返回经 menu_from_connector.py 归一化而来）；
     为 None 时按原有逻辑走 get_menu(token)（有 Token 直连 / 无 Token 回退静态菜单）。
     at: 指定点餐时间 "YYYY-MM-DD HH:MM"（默认现在），用于按时段调整推荐。
+    profile: 口味画像（profile.py 构建）；给出时会在牌意范围内优先你爱吃的、
+    并提示可用优惠券。为 None 时自动读本地画像，读不到就只按牌意推荐。
     """
     if at:
         now = datetime.strptime(at, "%Y-%m-%d %H:%M")
@@ -196,6 +214,12 @@ def do_reading(
     spread_name = SPREADS[spread_key][0]
     if menu is None:
         menu = get_menu(token)
+    if profile is None:
+        try:
+            import profile as profile_mod
+            profile = profile_mod.load_profile()
+        except Exception:  # noqa: BLE001 - 画像是增强项，坏了不影响解读
+            profile = None
     is_fallback = menu is mcp_client.FALLBACK_MENU
     drawn = draw(spread_key, date_str)
 
@@ -203,26 +227,63 @@ def do_reading(
     lines: List[str] = [_mood_opening(mood, spread_name)]
     lines.append(f"> ⏰ 现在是{period['name']}（{period['time']}）：{period['hint']}。\n")
     used_foods: set = set()
+    total_saving = 0.0
+    saving_lines: List[str] = []
 
     for idx, (card, orientation, position) in enumerate(drawn, 1):
-        prefer = tuned_portion(card, period)
-        item = resolve_item(card, menu, exclude=used_foods, prefer_form=prefer)
+        prefer = tuned_portion(card, period, profile)
+        item = resolve_item(card, menu, exclude=used_foods, prefer_form=prefer,
+                            profile=profile, period=period)
         name = item.get("name", card.get("mcd_category", "麦麦餐品"))
         used_foods.add(str(name))
         price = _fmt_price(item.get("price"))
         price_text = f"（{price}）" if price else ""
-        note = _portion_note(card, item, period)
+        note = _portion_note(card, item, period, profile)
         form = item.get("form") or "single"
         form_label = {"combo": "套餐", "share": "分享装", "light": "轻食", "single": "单品"}.get(form, "单品")
         orig = item.get("original_price")
         saving_text = ""
+        card_saving = 0.0
         if orig is not None and item.get("price") is not None:
             try:
                 diff = float(orig) - float(item["price"])
                 if diff >= 0.5:
                     saving_text = f"原价 ¥{_fmt_price(orig)[1:]}，立省 ¥{_fmt_price(diff)[1:]}"
+                    total_saving += diff
+                    card_saving += diff
             except (TypeError, ValueError):
                 saving_text = ""
+
+        # 券：只在这道菜真能用、且真更便宜时才说
+        deal = item.get("deal") or None
+        deal_text = ""
+        if deal:
+            more = "再" if saving_text else ""
+            if deal.get("free"):
+                deal_text = f"卡包里有「{deal['title']}」0 元券，这道直接免单（{more}省 ¥{_fmt_price(deal['saving'])[1:]}）"
+            elif deal.get("bogo"):
+                deal_text = f"有「{deal['title']}」，两件相当于{more}省 ¥{_fmt_price(deal['saving'])[1:]}"
+            else:
+                deal_text = (f"用「{deal['title']}」后 ¥{_fmt_price(deal['price'])[1:]}，"
+                             f"{more}省 ¥{_fmt_price(deal['saving'])[1:]}")
+            total_saving += float(deal.get("saving") or 0)
+            card_saving += float(deal.get("saving") or 0)
+
+        pref_why = item.get("affinity_why") or ""
+
+        # 同类里更像你平时会点的备选（只在更合口味 / 有券更省时才出现）
+        alt = mcp_client.alternative_for(card, item, menu, profile,
+                                         exclude=used_foods, prefer_form=prefer, period=period)
+        alt_text = ""
+        if alt:
+            alt_price = _fmt_price(alt.get("price"))
+            bits = [f"**{alt['name']}**{(' ' + alt_price) if alt_price else ''}"]
+            alt_deal = alt.get("deal")
+            if alt_deal:
+                bits.append(f"用券后 ¥{_fmt_price(alt_deal['price'])[1:]}，省 ¥{_fmt_price(alt_deal['saving'])[1:]}")
+            if alt.get("why"):
+                bits.append(alt["why"])
+            alt_text = "，".join(bits)
 
         meaning = card["reversed"] if orientation == "rev" else card["upright"]
         emotion = card["emotion_rev"] if orientation == "rev" else card["emotion_up"]
@@ -233,9 +294,19 @@ def do_reading(
         lines.append(f"- 塔罗意涵：{meaning}")
         lines.append(f"- 🍔 麦麦指引：**{name}**{price_text}")
         lines.append(f"- 🍱 形态：{form_label} · {note}")
+        if pref_why:
+            lines.append(f"- 🧠 合你口味：{pref_why}")
         if saving_text:
-            lines.append(f"- 💰 {saving_text}")
+            lines.append(f"- 💰 更划算：{saving_text}")
+        if deal_text:
+            lines.append(f"- 🎟 用券：{deal_text}")
+        if alt_text:
+            lines.append(f"- 🔁 或者更像你：{alt_text}")
         lines.append(f"- 💛 给你的话：{emotion}")
+
+        if saving_text or deal_text:
+            bits = [b for b in (saving_text, deal_text) if b]
+            saving_lines.append(f"- {name}：{'；'.join(bits)}")
 
         cards_block.append({
             "position": position,
@@ -255,8 +326,27 @@ def do_reading(
             "portion": prefer,
             "portion_note": note,
             "saving": saving_text,
+            "saving_value": round(card_saving, 1),
+            "deal": deal_text,
+            "alternative": alt_text,
+            "affinity": item.get("affinity") or 0,
+            "affinity_why": pref_why,
             "message": emotion,
         })
+
+    # 省钱小结：把所有能省的钱收个口
+    combo_note = mcp_client.combo_coupon_note(profile, period)
+    claim_note = mcp_client.claimable_hint(profile)
+    if saving_lines or claim_note:
+        lines.append("\n---\n")
+        lines.append("## 🧾 今天这样买更省\n")
+        lines.extend(saving_lines)
+        if total_saving >= 0.5:
+            lines.append(f"\n**合计可省约 ¥{_fmt_price(total_saving)[1:]}**（券以结算页实际可用为准）")
+        if claim_note:
+            lines.append(f"> {claim_note}")
+        if combo_note:
+            lines.append(f"> {combo_note}")
 
     # 三选一：把选择权交还用户
     if spread_key == "choice":
@@ -285,6 +375,8 @@ def do_reading(
         "mood": mood,
         "period": period,
         "menu_source": "fallback" if is_fallback else "real(mcd-mcp)",
+        "profile_used": bool(profile),
+        "total_saving": round(total_saving, 1),
         "cards": cards_block,
         "markdown": markdown,
     }
@@ -304,6 +396,7 @@ def do_week_reading(
     mood: Optional[str] = None,
     token: Optional[str] = None,
     menu: Optional[List[Dict]] = None,
+    profile: Optional[Dict] = None,
 ) -> Dict:
     """本周餐单：周一至周日各一张牌、一道菜，尽量不重样。
 
@@ -314,6 +407,12 @@ def do_week_reading(
 
     if menu is None:
         menu = get_menu(token)
+    if profile is None:
+        try:
+            import profile as profile_mod
+            profile = profile_mod.load_profile()
+        except Exception:  # noqa: BLE001
+            profile = None
     is_fallback = menu is mcp_client.FALLBACK_MENU
 
     lines: List[str] = ["# 🗓 麦麦塔罗牌 · 本周餐单\n"]
@@ -330,10 +429,14 @@ def do_week_reading(
         d = monday + timedelta(days=i)
         d_str = d.isoformat()
         card, orientation, _pos = draw("today", d_str)[0]
-        item = resolve_item(card, menu, exclude=used_foods)
+        item = resolve_item(card, menu, exclude=used_foods, profile=profile)
         name = str(item.get("name"))
         used_foods.add(name)
         price = _fmt_price(item.get("price"))
+        deal = item.get("deal") or None
+        price_cell = f"**{name}**{' ' + price if price else ''}"
+        if deal:
+            price_cell += f" 🎟省¥{_fmt_price(deal['saving'])[1:]}"
         message = card["emotion_rev"] if orientation == "rev" else card["emotion_up"]
         ori = "逆位" if orientation == "rev" else "正位"
         lines.append(
@@ -364,6 +467,7 @@ def do_week_reading(
         "date": monday.isoformat(),
         "mood": mood,
         "menu_source": "fallback" if is_fallback else "real(mcd-mcp)",
+        "profile_used": bool(profile),
         "days": days,
         "cards": [],
         "markdown": "\n".join(lines),
@@ -389,9 +493,26 @@ def main() -> None:
     ap.add_argument("--no-cache", action="store_true", help="不使用本地门店/菜单缓存")
     ap.add_argument("--json", dest="json_out", default=None, help="把解读结果写成 JSON 文件")
     ap.add_argument("--card-svg", default=None, help="生成塔罗牌面卡片（SVG 路径）")
+    ap.add_argument("--profile-file", default=None, help="口味画像 JSON（默认读 ~/.cache/mcd-tarot/profile.json）")
+    ap.add_argument("--no-profile", action="store_true", help="不使用口味画像，只按牌意推荐")
     args = ap.parse_args()
 
     token = os.environ.get(args.token_env) if args.token_env else None
+    profile = False if args.no_profile else None
+    if profile is None:
+        if args.profile_file:
+            try:
+                with open(args.profile_file, encoding="utf-8") as f:
+                    profile = json.load(f)
+            except (OSError, json.JSONDecodeError) as exc:
+                print(f"[warn] 画像文件读取失败，忽略：{exc}")
+                profile = False
+        else:
+            try:
+                import profile as profile_mod
+                profile = profile_mod.load_profile()
+            except Exception:  # noqa: BLE001
+                profile = None
     menu = None
     if args.menu_file:
         with open(args.menu_file, encoding="utf-8") as f:
@@ -407,12 +528,13 @@ def main() -> None:
             menu = None
 
     if args.week:
-        result = do_week_reading(args.date, args.mood, token, menu=menu)
+        result = do_week_reading(args.date, args.mood, token, menu=menu, profile=profile)
     else:
-        result = do_reading(args.spread, args.date, args.mood, token, menu=menu, at=args.at)
+        result = do_reading(args.spread, args.date, args.mood, token, menu=menu,
+                            at=args.at, profile=profile)
 
     print(result["markdown"])
-    print(f"\n[菜单来源] {result['menu_source']}")
+    print(f"\n[菜单来源] {result['menu_source']}　[口味画像] {'已使用' if result.get('profile_used') else '未使用'}")
 
     if args.json_out:
         with open(args.json_out, "w", encoding="utf-8") as f:
