@@ -243,8 +243,7 @@ def _card_svg(card: Dict, meta: Dict) -> str:
 {saving_badge}
 
 <!-- 页脚 -->
-<text x="{W / 2}" y="1140" font-size="15" fill="{MUTED}" text-anchor="middle" opacity="0.8">{_esc(meta.get("date", ""))} · 餐品与价格以麦当劳官方实时为准</text>
-<text x="{W / 2}" y="1164" font-size="14" fill="{MUTED}" text-anchor="middle" opacity="0.6">塔罗仅供参考，胃口归你</text>
+<text x="{W / 2}" y="1148" font-size="14" fill="{MUTED}" text-anchor="middle" opacity="0.72">{_esc(meta.get("date", ""))} · 餐品与价格以麦当劳官方实时为准 · 塔罗仅供参考</text>
 </svg>"""
 
 
