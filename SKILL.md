@@ -23,8 +23,8 @@ WorkBuddy 的 Skill **没有「安装完自动说话」的钩子**——只有�
 python3 scripts/onboard.py --check     # {"first_time": true, "greeting": "…"}
 ```
 
-- `first_time: true` → **原样输出** `greeting` 那段话（自我介绍 + 三件能帮的事 +
-  「要不要现在翻开你的今日运势？回复『是』我就抽，『否』我就不打扰」），然后**就此打住**，不要顺手抽牌。
+- `first_time: true` → **原样输出** `greeting` 那两段话（一行自我介绍「我是谁 + 我能做什么」，
+  一行问「要不要现在翻开今日运势？回『是』/『否』」），然后**就此打住**，不要顺手抽牌、不要加戏。
 - 收到回答 → `python3 scripts/onboard.py --answer "<用户原话>"`
   - `answer: "yes"` → 说一句开抽的话，**才**进入下面的抽牌流程（脚本已自动标记已招呼）。
   - `answer: "no"` → 简短收尾（「好，想吃的时候随时叫我」），不要继续推销。
