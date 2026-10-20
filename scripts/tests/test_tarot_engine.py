@@ -203,6 +203,96 @@ def test_cache_store_roundtrip(tmp_note=None):
                 os.environ["MCD_TAROT_CACHE"] = old
 
 
+def test_period_combo_at_lunch_single_at_night():
+    """同一张牌：午餐时段推套餐，夜宵时段推单品。"""
+    from datetime import datetime
+
+    card = tarot_deck.find_card("星币七")   # 星币花色 → 汉堡类关键词
+    menu = [
+        {"name": "巨无霸", "price": 26.0, "category": "汉堡", "form": "single"},
+        {"name": "巨无霸三件套", "price": 37.0, "original_price": 50.5,
+         "category": "汉堡", "form": "combo"},
+    ]
+    lunch = tarot_engine.period_of(datetime(2026, 10, 20, 12, 30))
+    night = tarot_engine.period_of(datetime(2026, 10, 20, 22, 0))
+    assert lunch["name"] == "午餐", lunch
+    assert night["name"] == "夜宵", night
+
+    p_lunch = tarot_engine.tuned_portion(card, lunch)
+    p_night = tarot_engine.tuned_portion(card, night)
+    assert p_lunch == "combo", p_lunch
+    assert p_night in ("light", "single"), p_night
+
+    lunch_item = mcp_client.resolve_item(card, menu, prefer_form=p_lunch)
+    night_item = mcp_client.resolve_item(card, menu, prefer_form=p_night)
+    assert "三件套" in lunch_item["name"], lunch_item
+    assert night_item["name"] == "巨无霸", night_item
+
+
+def test_reading_reports_period_and_form():
+    """解读结果应带上时段、餐品形态与（有折扣时的）立省信息。"""
+    menu = [
+        {"name": "巨无霸三件套", "price": 37.0, "original_price": 50.5,
+         "category": "汉堡", "form": "combo"},
+        {"name": "巨无霸", "price": 26.0, "category": "汉堡", "form": "single"},
+    ]
+    r = tarot_engine.do_reading("today", "2026-10-20", menu=menu, at="2026-10-20 12:30")
+    assert r["period"]["name"] == "午餐"
+    card = r["cards"][0]
+    assert card["form"] in ("combo", "single", "share", "light"), card
+    assert "⏰ 现在是午餐" in r["markdown"]
+    if card["form"] == "combo":
+        assert "立省" in r["markdown"], "套餐应显示立省金额"
+
+
+def test_tarot_card_renders_with_and_without_image(tmp_path=None):
+    """牌面卡片：没有图也能出牌（走手绘占位），有图能内联 base64。"""
+    import tarot_card
+
+    card = {
+        "position": "今天", "card_id": 7, "card_cn": "战车", "card_en": "The Chariot",
+        "orientation": "逆位", "food": "麦辣鸡翅", "price": "¥14.5",
+        "form_label": "单品", "message": "油门踩下去，别怕。", "image": "",
+    }
+    reading = {"date": "2026-10-20", "spread_name": "今日宜吃", "cards": [card]}
+    svg = tarot_card._card_svg(card, {"date": "2026-10-20"})
+    assert "战车" in svg and "逆位" in svg, "牌名与逆位标记应出现在牌面"
+    assert "VII" in svg, "大阿卡纳应显示罗马数字"
+    assert "clipPath" in svg and "arch" in svg, "应有拱形画框"
+    out = tarot_card.render(reading, str(os.path.join(os.path.dirname(__file__), "_tmp_card.svg")))
+    assert os.path.exists(out)
+    os.remove(out)
+
+
+def test_order_draft_card():
+    """订单确认卡：能按 code 从菜单缓存取菜名与价格，并写明「还没下单」。"""
+    import argparse
+    import tempfile
+    import order
+
+    with tempfile.TemporaryDirectory() as td:
+        old = os.environ.get("MCD_TAROT_CACHE")
+        os.environ["MCD_TAROT_CACHE"] = td
+        try:
+            order.CACHE = __import__("pathlib").Path(td)
+            order.ORDERS = order.CACHE / "orders.json"
+            (order.CACHE / "menus").mkdir(parents=True, exist_ok=True)
+            import cache as cache_mod
+            cache_mod.save_menu("1990262001", [
+                {"name": "巨无霸", "code": "1100", "price": 26.0, "form": "single"},
+            ])
+            args = argparse.Namespace(store="1990262001", store_name="南京徐庄路快捷小站",
+                                      items="1100:2", way="locker-in", way_name="外带")
+            order.cmd_draft(args)
+            data = order._load()
+            assert data["drafts"] and data["drafts"][-1]["estimate"] == 52.0, data["drafts"]
+        finally:
+            if old is None:
+                os.environ.pop("MCD_TAROT_CACHE", None)
+            else:
+                os.environ["MCD_TAROT_CACHE"] = old
+
+
 if __name__ == "__main__":
     mod = sys.modules[__name__]
     fns = [getattr(mod, n) for n in dir(mod) if n.startswith("test_")]

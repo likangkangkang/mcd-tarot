@@ -395,6 +395,55 @@ MINOR_ARCANA: List[Dict] = _build_minor()
 # 全牌组（78 张），按 id 排序
 ALL_CARDS: List[Dict] = sorted(MAJOR_ARCANA + MINOR_ARCANA, key=lambda c: c["id"])
 
+# ---------------------------------------------------------------------------
+# 份量倾向：这张牌更适合「轻食 / 单品 / 套餐 / 分享」
+# 推荐时结合点餐时段一起用：午餐晚餐更愿意推套餐，下午茶夜宵更愿意推轻食。
+# ---------------------------------------------------------------------------
+PORTION_LABEL = {
+    "light": "轻食",
+    "single": "单品",
+    "combo": "套餐",
+    "share": "分享装",
+}
+
+MAJOR_PORTION: Dict[int, str] = {
+    0: "single",   # 愚者：轻装出发，一份就好
+    1: "combo",    # 魔术师：原料齐全，一套配齐
+    2: "light",    # 女祭司：一点点甜
+    3: "combo",    # 皇后：丰盛
+    4: "combo",    # 皇帝：管饱、有掌控感
+    5: "single",   # 教皇：经典单品
+    6: "share",    # 恋人：分享
+    7: "combo",    # 战车：燃料要够
+    8: "single",   # 力量：稳稳一份
+    9: "light",    # 隐士：简单一点
+    10: "combo",   # 命运之轮：随心配、什么都来点
+    11: "single",  # 正义：刚刚好
+    12: "light",   # 倒吊人：停一停，别吃太满
+    13: "single",  # 死神：断舍离，清爽
+    14: "light",   # 节制：刚好够
+    15: "combo",   # 恶魔：放纵一次
+    16: "single",  # 高塔：简单直接
+    17: "light",   # 星星：清清爽爽
+    18: "light",   # 月亮：温柔的小东西
+    19: "combo",   # 太阳：快乐要成套餐
+    20: "single",  # 审判：清醒的选择
+    21: "share",   # 世界：圆满，值得分享
+}
+
+_MINOR_PORTION: Dict[str, str] = {
+    "ace": "light", "2": "single", "3": "light", "4": "single", "5": "single",
+    "6": "light", "7": "single", "8": "combo", "9": "combo", "10": "combo",
+    "page": "light", "knight": "combo", "queen": "share", "king": "combo",
+}
+
+
+def portion_of(card: Dict) -> str:
+    """这张牌在这次点餐里更适合什么份量形态。"""
+    if card.get("arcana") == "major":
+        return MAJOR_PORTION.get(int(card.get("id", 0)), "single")
+    return _MINOR_PORTION.get(str(card.get("rank")), "single")
+
 # 便于按 id / 名称查找
 _BY_ID: Dict[int, Dict] = {c["id"]: c for c in ALL_CARDS}
 _BY_NAME: Dict[str, Dict] = {c["name_cn"]: c for c in ALL_CARDS}

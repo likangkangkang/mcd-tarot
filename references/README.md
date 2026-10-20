@@ -47,7 +47,8 @@ python3 scripts/tarot_engine.py --spread today --mood "加班到很晚，有点�
 python3 scripts/tarot_engine.py --spread choice --mood "选择困难"
 python3 scripts/tarot_engine.py --spread timeline --date 2026-10-16
 python3 scripts/tarot_engine.py --week                    # 本周餐单
-python3 scripts/tarot_engine.py --spread today --card-svg card.svg   # 可分享卡片
+python3 scripts/tarot_engine.py --spread today --card-svg card.svg   # 塔罗牌面（带餐品图）
+python3 scripts/tarot_engine.py --spread today --at "2026-10-20 12:30"  # 模拟午餐时段推荐
 
 # 想用真实菜单（需要 Token）：通过环境变量传入
 export MCD_MCP_TOKEN=你的Token
@@ -67,7 +68,8 @@ mcd-tarot/
 │   ├── menu_from_connector.py  # query-meals 返回 → 引擎菜单（可写缓存）
 │   ├── cache.py             # 门店记忆 + 当日菜单缓存
 │   ├── selfcheck.py         # 换季自检（价格覆盖 / 误映射 / 重复牌）
-│   ├── card_svg.py          # 可分享竖版卡片（SVG）
+│   ├── tarot_card.py        # 塔罗牌面（红金框 + 拱形画框 + 餐品图 + 罗马数字）
+│   ├── order.py             # 下单确认卡 + 订单记录（付款由用户本人完成）
 │   └── tests/               # 单元测试
 ├── references/              # README / MCP 集成说明 / 示例解读 / 安装维护 / 参赛材料
 ├── assets/                  # 连接器配置模板、环境变量示例、requirements

@@ -29,6 +29,10 @@ def normalize(raw: Any) -> List[Dict[str, Any]]:
     兼容两种形态：
     - 完整业务返回: {"success": true, "data": {"categories": [...], "meals": {code: {...}}}}
     - 已是简化菜单: [{"name": ..., "price": ...}, ...]
+
+    除名称/价格外，还会保留：餐品图 image、划线价 original_price、优惠类型
+    discount_type、分类 tags，以及「套餐 / 单品 / 周边」形态 form——推荐时要靠这些
+    信息判断该点套餐还是单品、能不能省钱。
     """
     # 形态二：本身就是菜单列表
     if isinstance(raw, list):
@@ -41,6 +45,7 @@ def normalize(raw: Any) -> List[Dict[str, Any]]:
     categories = data.get("categories") or []
     # code -> 分类名（分类名可能含换行，如 "鸡肉汉堡\\n/卷"）
     code_to_cat: Dict[str, str] = {}
+    code_to_tags: Dict[str, List[str]] = {}
     if isinstance(categories, list):
         for cat in categories:
             if not isinstance(cat, dict):
@@ -48,38 +53,68 @@ def normalize(raw: Any) -> List[Dict[str, Any]]:
             cat_name = str(cat.get("name", "")).replace("\n", "").strip()
             for m in cat.get("meals") or []:
                 if isinstance(m, dict) and m.get("code"):
-                    code_to_cat[str(m["code"])] = cat_name
+                    code = str(m["code"])
+                    code_to_cat[code] = cat_name
+                    tags = m.get("tags") or []
+                    code_to_tags[code] = [str(t) for t in tags if t]
 
     meals = data.get("meals")
     out: List[Dict[str, Any]] = []
     if isinstance(meals, dict):
-        # 标准形态：{code: {name, currentPrice, originalPrice, ...}}
+        # 标准形态：{code: {name, image, currentPrice, originalPrice, ...}}
         for code, detail in meals.items():
             if not isinstance(detail, dict):
                 continue
             name = detail.get("name")
             if not name:
                 continue
+            tags = code_to_tags.get(str(code), [])
             out.append({
                 "name": str(name),
                 "code": str(code),
                 "price": _to_float(detail.get("currentPrice") or detail.get("originalPrice")),
                 "category": code_to_cat.get(str(code), ""),
+                "original_price": _to_float(detail.get("originalPrice")),
+                "discount_type": str(detail.get("discountType") or ""),
+                "image": str(detail.get("image") or ""),
+                "tags": tags,
+                "form": form_of(str(name), tags),
             })
     elif isinstance(meals, list):
         out = [it for it in (_norm_item(x) for x in meals if isinstance(x, dict)) if it["name"]]
     return out
 
 
+# 形态判断：套餐 / 单品 / 周边
+_COMBO_WORDS = ("套餐", "三件套", "四件套", "分享餐", "双拼", "拼盘", "桶", "组合", "随心选", "随心配", "任选")
+_GOODS_WORDS = ("周边", "贴纸", "毛绒", "玩具", "盲盒", "捶", "挠")
+
+
+def form_of(name: str, tags: List[str] | None = None) -> str:
+    """把餐品分成 combo（套餐）/ single（单品）/ goods（周边）。"""
+    tags = tags or []
+    if any(w in name for w in _GOODS_WORDS) or any(w in t for t in tags for w in _GOODS_WORDS):
+        return "goods"
+    if "套餐" in tags or any(w in name for w in _COMBO_WORDS):
+        return "combo"
+    return "single"
+
+
 def _norm_item(it: Dict[str, Any]) -> Dict[str, Any]:
     name = it.get("name") or it.get("productName") or it.get("title") or ""
     code = it.get("code") or it.get("productCode") or it.get("id")
     price = it.get("price") or it.get("currentPrice") or it.get("salePrice")
+    tags = [str(t) for t in (it.get("tags") or []) if t]
     return {
         "name": str(name),
         "code": str(code) if code is not None else None,
         "price": _to_float(price),
         "category": it.get("category") or it.get("categoryName") or "",
+        "original_price": _to_float(it.get("original_price") or it.get("originalPrice")),
+        "discount_type": str(it.get("discount_type") or it.get("discountType") or ""),
+        "image": str(it.get("image") or it.get("imageUrl") or ""),
+        "tags": tags,
+        "form": form_of(str(name), tags),
     }
 
 

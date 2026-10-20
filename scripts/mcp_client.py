@@ -210,20 +210,57 @@ def _cheapest(pool: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     return min(priced, key=lambda it: (float(it["price"]), len(str(it["name"]))))
 
 
+def _form(item: Dict[str, Any]) -> str:
+    """餐品形态：优先用菜单归一化时算好的 form，缺失时用名字兜底判断。"""
+    f = item.get("form")
+    if f:
+        return str(f)
+    name = str(item.get("name") or "")
+    if NON_FOOD_PATTERN.search(name):
+        return "goods"
+    if BUNDLE_PATTERN.search(name):
+        return "combo"
+    return "single"
+
+
+# 形态偏好的放宽顺序（选不到理想形态时退一档）
+_FORM_FALLBACK = {
+    "light": ("light", "single"),
+    "single": ("single", "light"),
+    "combo": ("combo", "single"),
+    "share": ("share", "combo"),
+}
+
+
+def _pick_with_form(pool: List[Dict[str, Any]], prefer_form: Optional[str]) -> Optional[Dict[str, Any]]:
+    """在候选里挑一个：有形态偏好就优先满足，否则默认「单品优先、名字最短」。"""
+    if not pool:
+        return None
+    if prefer_form:
+        allowed = _FORM_FALLBACK.get(prefer_form, (prefer_form,))
+        for want in allowed:
+            hits = [it for it in pool if _form(it) == want]
+            if hits:
+                return min(hits, key=lambda it: len(str(it["name"])))
+    singles = [it for it in pool if _form(it) != "combo"]
+    return min(singles or pool, key=lambda it: len(str(it["name"])))
+
+
 def resolve_item(
     card: Dict[str, Any],
     menu: List[Dict[str, Any]],
     exclude: Optional[set] = None,
+    prefer_form: Optional[str] = None,
 ) -> Dict[str, Any]:
     """根据牌的 mcd_keywords 在菜单里匹配真实单品；匹配不到用关键词兜底。
 
-    同一关键词内按「同名 > 单品优先 > 名称最短」择优：
+    同一关键词内按「同名 > 形态偏好 > 单品优先 > 名称最短」择优：
     - 同名优先，避免「巨无霸」被「巨无霸三件套」抢先；
-    - 单品优先于套餐，塔罗指引落到「一道真实的餐品」而不是一份组合；
+    - prefer_form 由牌意 + 点餐时段算出（light/single/combo/share），
+      午餐晚餐更愿意给套餐，下午茶夜宵更愿意给轻食；
     - 非餐品（周边、贴纸、酱料）直接排除；
     - exclude：已被本牌阵其它牌用掉的餐品名，先在同品类里换一道没用过的；
-    - 关键词全都没命中时（新店/小菜单/换季），退到同品类真实带价餐品，
-      宁可菜名不够贴切，也不给用户一个没有价格的裸关键词。
+    - 关键词全都没命中时（新店/小菜单/换季），退到同品类真实带价餐品。
     """
     keywords = card.get("mcd_keywords") or []
     exclude = exclude or set()
@@ -245,16 +282,24 @@ def resolve_item(
         if not fresh:
             backup = backup or hits[0]
             continue
-        # 关键词本身指向套餐（如「全明星双人分享餐」）时不做单品优先
-        allow_bundle = bool(BUNDLE_PATTERN.search(kw))
-        singles = fresh if allow_bundle else [it for it in fresh if not BUNDLE_PATTERN.search(str(it["name"]))]
-        if not singles:
+        # 关键词本身指向套餐（如「全明星双人分享餐」）时不做单品优先；
+        # 正餐时段明确想要套餐时，也把套餐留在候选里
+        allow_bundle = bool(BUNDLE_PATTERN.search(kw)) or prefer_form in ("combo", "share")
+        pool = fresh if allow_bundle else [it for it in fresh if _form(it) != "combo"]
+        if not pool:
             bundle_backup = bundle_backup or min(fresh, key=lambda it: len(str(it["name"])))
             continue
-        for it in singles:
+        # 想吃套餐/分享装时，形态优先于「同名单品」
+        if prefer_form in ("combo", "share"):
+            picked = _pick_with_form(pool, prefer_form)
+            if picked is not None:
+                return _tag(picked, "keyword")
+        for it in pool:
             if str(it["name"]) == kw:
                 return _tag(it, "keyword")
-        return _tag(min(singles, key=lambda it: len(str(it["name"]))), "keyword")
+        picked = _pick_with_form(pool, prefer_form)
+        if picked is not None:
+            return _tag(picked, "keyword")
 
     # 关键词命中但都已被占用 → 同品类里换一道没用过的菜；没有就允许重样
     diverse = _pick_diverse(card, menu, exclude)
@@ -292,7 +337,7 @@ def resolve_item(
     fallback_name = next((k for k in keywords if k and k not in exclude), None)
     fallback_name = fallback_name or (keywords[0] if keywords else card.get("mcd_category", "麦麦餐品"))
     return {"name": fallback_name, "code": None, "price": None, "category": card.get("mcd_category"),
-            "_match": "none"}
+            "original_price": None, "image": "", "form": prefer_form or "single", "_match": "none"}
 
 
 if __name__ == "__main__":

@@ -24,7 +24,7 @@ import json
 import os
 import random
 import re
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 
 import tarot_deck
@@ -49,6 +49,77 @@ SPREADS: Dict[str, Tuple[str, List[str]]] = {
 }
 
 REVERSED_CHANCE = 0.3  # 逆位概率
+
+# ---------------------------------------------------------------------------
+# 点餐时段：同样是「累」，早上十点和晚上十点该吃的东西不一样
+# ---------------------------------------------------------------------------
+PERIODS = [
+    (5 * 60, 10 * 60 + 29, "breakfast", "早餐",
+     "早餐时段的咖啡、奶铁常有早餐卡价，配个热的更舒服"),
+    (10 * 60 + 30, 13 * 60 + 59, "lunch", "午餐",
+     "午市套餐普遍比单点省十块以上，适合一次吃完整"),
+    (14 * 60, 16 * 60 + 59, "afternoon", "下午茶",
+     "小食配饮品就够，别让血糖坐过山车"),
+    (17 * 60, 20 * 60 + 59, "dinner", "晚餐",
+     "晚餐适合把套餐吃完整，犒劳跑了一天的自己"),
+    (21 * 60, 23 * 60 + 59, "night", "夜宵",
+     "这个点别碰咖啡，胃会抗议"),
+    (0, 4 * 60 + 59, "night", "夜宵",
+     "这个点别碰咖啡，胃会抗议"),
+]
+
+# 时段 → 形态倾向：正餐推套餐，其余推轻食/单品
+_PERIOD_PREFER = {
+    "breakfast": "light",
+    "lunch": "combo",
+    "afternoon": "light",
+    "dinner": "combo",
+    "night": "light",
+}
+
+
+def period_of(now: Optional[datetime] = None) -> Dict[str, str]:
+    """当前属于哪个点餐时段，以及该时段的推荐倾向。"""
+    now = now or datetime.now()
+    minutes = now.hour * 60 + now.minute
+    for start, end, key, name, hint in PERIODS:
+        if start <= minutes <= end:
+            return {"key": key, "name": name, "hint": hint,
+                    "prefer": _PERIOD_PREFER[key], "time": now.strftime("%H:%M")}
+    return {"key": "lunch", "name": "正餐", "hint": "什么时候吃都别亏待自己",
+            "prefer": "combo", "time": now.strftime("%H:%M")}
+
+
+def tuned_portion(card: Dict, period: Optional[Dict[str, str]]) -> str:
+    """把「牌意的份量倾向」和「时段」合成一个推荐形态。"""
+    base = tarot_deck.portion_of(card)
+    if not period:
+        return base
+    key = period["key"]
+    if key in ("lunch", "dinner"):
+        return {"light": "single", "single": "combo", "combo": "combo", "share": "share"}[base]
+    if key in ("afternoon", "night"):
+        return {"light": "light", "single": "light", "combo": "single", "share": "combo"}[base]
+    return {"light": "light", "single": "single", "combo": "single", "share": "combo"}[base]
+
+
+def _portion_note(card: Dict, item: Dict, period: Optional[Dict[str, str]]) -> str:
+    """一句话解释「为什么给你配了这个形态」。"""
+    base = tarot_deck.portion_of(card)
+    label = tarot_deck.PORTION_LABEL.get(base, "单品")
+    form = item.get("form") or ("combo" if "套餐" in str(item.get("name")) else "single")
+    pname = period["name"] if period else ""
+    if form == "combo":
+        if period and period["key"] in ("lunch", "dinner"):
+            return f"牌面偏「{label}」，{pname}配套餐更划算"
+        return f"牌面偏「{label}」，这份套餐配得齐、不用再凑"
+    if form == "share":
+        return f"牌面偏「{label}」，这份适合分着吃"
+    if period and period["key"] in ("afternoon", "night"):
+        return f"牌面偏「{label}」，{pname}不必吃太满，单品刚好"
+    if period and period["key"] == "breakfast":
+        return f"牌面偏「{label}」，早上吃轻一点，一整天都舒服"
+    return f"牌面偏「{label}」，单品就是今天的分寸"
 
 
 def daily_seed(date_str: str) -> int:
@@ -107,14 +178,21 @@ def do_reading(
     mood: Optional[str] = None,
     token: Optional[str] = None,
     menu: Optional[List[Dict]] = None,
+    at: Optional[str] = None,
 ) -> Dict:
     """生成一次完整解读，返回含 markdown 的字典。
 
     menu: 直接注入菜单（[{"name","price","code","category"}, ...]，通常由
     mcd-mcp 连接器的 query-meals 返回经 menu_from_connector.py 归一化而来）；
     为 None 时按原有逻辑走 get_menu(token)（有 Token 直连 / 无 Token 回退静态菜单）。
+    at: 指定点餐时间 "YYYY-MM-DD HH:MM"（默认现在），用于按时段调整推荐。
     """
-    date_str = date_str or date.today().isoformat()
+    if at:
+        now = datetime.strptime(at, "%Y-%m-%d %H:%M")
+    else:
+        now = datetime.now()
+    date_str = date_str or now.date().isoformat()
+    period = period_of(now)
     spread_name = SPREADS[spread_key][0]
     if menu is None:
         menu = get_menu(token)
@@ -123,14 +201,28 @@ def do_reading(
 
     cards_block: List[Dict] = []
     lines: List[str] = [_mood_opening(mood, spread_name)]
+    lines.append(f"> ⏰ 现在是{period['name']}（{period['time']}）：{period['hint']}。\n")
     used_foods: set = set()
 
     for idx, (card, orientation, position) in enumerate(drawn, 1):
-        item = resolve_item(card, menu, exclude=used_foods)
+        prefer = tuned_portion(card, period)
+        item = resolve_item(card, menu, exclude=used_foods, prefer_form=prefer)
         name = item.get("name", card.get("mcd_category", "麦麦餐品"))
         used_foods.add(str(name))
         price = _fmt_price(item.get("price"))
         price_text = f"（{price}）" if price else ""
+        note = _portion_note(card, item, period)
+        form = item.get("form") or "single"
+        form_label = {"combo": "套餐", "share": "分享装", "light": "轻食", "single": "单品"}.get(form, "单品")
+        orig = item.get("original_price")
+        saving_text = ""
+        if orig is not None and item.get("price") is not None:
+            try:
+                diff = float(orig) - float(item["price"])
+                if diff >= 0.5:
+                    saving_text = f"原价 ¥{_fmt_price(orig)[1:]}，立省 ¥{_fmt_price(diff)[1:]}"
+            except (TypeError, ValueError):
+                saving_text = ""
 
         meaning = card["reversed"] if orientation == "rev" else card["upright"]
         emotion = card["emotion_rev"] if orientation == "rev" else card["emotion_up"]
@@ -140,16 +232,29 @@ def do_reading(
         lines.append(f"**{card['name_cn']} · {card['name_en']}**（{ori_tag}）")
         lines.append(f"- 塔罗意涵：{meaning}")
         lines.append(f"- 🍔 麦麦指引：**{name}**{price_text}")
+        lines.append(f"- 🍱 形态：{form_label} · {note}")
+        if saving_text:
+            lines.append(f"- 💰 {saving_text}")
         lines.append(f"- 💛 给你的话：{emotion}")
 
         cards_block.append({
             "position": position,
+            "card_id": card["id"],
             "card_cn": card["name_cn"],
             "card_en": card["name_en"],
             "orientation": ori_tag,
             "meaning": meaning,
             "food": name,
+            "food_code": item.get("code"),
             "price": price,
+            "price_raw": item.get("price"),
+            "original_price": orig,
+            "image": item.get("image") or "",
+            "form": form,
+            "form_label": form_label,
+            "portion": prefer,
+            "portion_note": note,
+            "saving": saving_text,
             "message": emotion,
         })
 
@@ -167,6 +272,10 @@ def do_reading(
         "无论今天过得怎样，好好吃一顿，是你对自己最朴素的温柔。"
         "以上由麦麦塔罗牌生成，餐品供应与价格以麦当劳官方实时为准。🥤"
     )
+    lines.append(
+        "\n💡 想直接吃这一份？回「就它」，我可以帮你核对实时价格并下单，"
+        "付款链接由你自己打开付款。"
+    )
 
     markdown = "\n".join(lines)
     return {
@@ -174,6 +283,7 @@ def do_reading(
         "spread_name": spread_name,
         "date": date_str,
         "mood": mood,
+        "period": period,
         "menu_source": "fallback" if is_fallback else "real(mcd-mcp)",
         "cards": cards_block,
         "markdown": markdown,
@@ -270,13 +380,15 @@ def main() -> None:
     ap.add_argument("--week", action="store_true", help="输出本周餐单（周一至周日）")
     ap.add_argument("--mood", default=None, help="今天的心情（可选，用于个性化开场）")
     ap.add_argument("--date", default=None, help="指定日期 YYYY-MM-DD（默认今天）")
+    ap.add_argument("--at", default=None,
+                    help='指定点餐时间 "YYYY-MM-DD HH:MM"（默认现在），用于按时段调整推荐')
     ap.add_argument("--token-env", default="MCD_MCP_TOKEN", help="读取真实菜单的 Token 环境变量名")
     ap.add_argument("--menu-file", default=None,
                     help="从 JSON 文件加载菜单（[{name, price, code, category}, ...]），"
                          "可由 mcd-mcp 连接器 query-meals 结果经 menu_from_connector.py 归一化生成")
     ap.add_argument("--no-cache", action="store_true", help="不使用本地门店/菜单缓存")
     ap.add_argument("--json", dest="json_out", default=None, help="把解读结果写成 JSON 文件")
-    ap.add_argument("--card-svg", default=None, help="额外生成一张可分享卡片（SVG 路径）")
+    ap.add_argument("--card-svg", default=None, help="生成塔罗牌面卡片（SVG 路径）")
     args = ap.parse_args()
 
     token = os.environ.get(args.token_env) if args.token_env else None
@@ -297,7 +409,7 @@ def main() -> None:
     if args.week:
         result = do_week_reading(args.date, args.mood, token, menu=menu)
     else:
-        result = do_reading(args.spread, args.date, args.mood, token, menu=menu)
+        result = do_reading(args.spread, args.date, args.mood, token, menu=menu, at=args.at)
 
     print(result["markdown"])
     print(f"\n[菜单来源] {result['menu_source']}")
@@ -308,8 +420,8 @@ def main() -> None:
         print(f"[JSON] {args.json_out}")
 
     if args.card_svg:
-        import card_svg
-        path = card_svg.render(result, args.card_svg)
+        import tarot_card
+        path = tarot_card.render(result, args.card_svg)
         print(f"[卡片] {path}")
 
 

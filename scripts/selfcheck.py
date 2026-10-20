@@ -3,7 +3,7 @@
 检查项
 ------
 1. **价格覆盖**：78 张牌能否在菜单里匹配到带价格的真实餐品（匹配不到 = 用户会看到裸关键词）。
-2. **误映射**：是否落到了套餐/周边/玩具这类不合适的对象（如「薯条 → 薯条脆卜卜毛绒周边」）。
+2. **误映射**：是否落到了周边/玩具这类非餐品（如「薯条 → 薯条脆卜卜毛绒周边」）。
 3. **重复牌**：三张牌阵在同一天是否抽到同一张牌（不应发生）。
 4. **菜品重复**：三张牌阵是否给出同一道菜（尽量不重样）。
 5. **关键词命中率**：有多少张牌靠的是兜底关键词而非真实菜品。
@@ -32,7 +32,8 @@ import mcp_client
 import tarot_deck
 import tarot_engine
 
-SUSPICIOUS = re.compile(r"套餐|三件套|双人|单人|组合|周边|毛绒|贴纸|玩具|盲盒|桶")
+# 现在会按时段主动推荐套餐，套餐不再算问题；只有周边/玩具这类非餐品才算误映射
+SUSPICIOUS = re.compile(r"周边|毛绒|贴纸|玩具|盲盒|捶|痒挠")
 
 
 def _load_menu(path: str | None) -> tuple[List[Dict[str, Any]], str]:
@@ -85,9 +86,12 @@ def run(menu: List[Dict[str, Any]], days: int) -> Dict[str, Any]:
                 dup_foods += 1
 
     total = len(tarot_deck.ALL_CARDS)
+    with_image = sum(1 for it in menu if it.get("image"))
     report = {
         "menu_size": len(menu),
         "cards": total,
+        "image_coverage": f"{with_image}/{len(menu)}",
+        "combo_count": sum(1 for it in menu if it.get("form") == "combo"),
         "price_coverage": f"{total - len(no_price)}/{total}",
         "no_price": no_price,
         "suspicious": suspicious,
@@ -119,6 +123,7 @@ def main() -> None:
     icon = "✅" if report["ok"] else "⚠️"
     print(f"{icon} 麦麦塔罗牌自检 · 菜单来源：{source}（{report['menu_size']} 条）\n")
     print(f"- 价格覆盖：{report['price_coverage']}")
+    print(f"- 餐品图：{report['image_coverage']}（牌面画框要用）· 套餐 {report['combo_count']} 个")
     if report["no_price"]:
         print(f"  · 无价格（会退化成裸关键词）：{', '.join(report['no_price'])}")
     hit = report["cards"] - len(report["weak_match"])
@@ -126,7 +131,7 @@ def main() -> None:
     if report["weak_match"]:
         print(f"  · 弱匹配：{', '.join(report['weak_match'])}")
     if report["suspicious"]:
-        print("- 疑似误映射（套餐/周边）：")
+        print("- 疑似误映射（周边/玩具）：")
         for s in report["suspicious"]:
             print(f"  · {s['card']} → {s['food']}")
     print(f"- 重复牌：{report['dup_card_samples']}（{args.days} 天 × 3 牌阵）")
