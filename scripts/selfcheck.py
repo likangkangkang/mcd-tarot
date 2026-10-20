@@ -50,16 +50,17 @@ def _load_menu(path: str | None) -> tuple[List[Dict[str, Any]], str]:
 def run(menu: List[Dict[str, Any]], days: int) -> Dict[str, Any]:
     no_price: List[str] = []
     suspicious: List[Dict[str, str]] = []
-    fallback_used: List[str] = []
+    weak: List[str] = []
 
     for card in tarot_deck.ALL_CARDS:
         item = mcp_client.resolve_item(card, menu)
         name = str(item.get("name", ""))
         if item.get("price") is None:
             no_price.append(f"{card['name_cn']} → {name}")
-            fallback_used.append(card["name_cn"])
         if SUSPICIOUS.search(name):
             suspicious.append({"card": card["name_cn"], "food": name})
+        if item.get("_match") in ("category-fallback", "menu-fallback", "none"):
+            weak.append(f"{card['name_cn']} → {name}")
 
     spreads = ["trinity", "timeline", "choice"]
     dup_cards = 0
@@ -90,10 +91,16 @@ def run(menu: List[Dict[str, Any]], days: int) -> Dict[str, Any]:
         "price_coverage": f"{total - len(no_price)}/{total}",
         "no_price": no_price,
         "suspicious": suspicious,
-        "fallback_rate": f"{len(fallback_used)}/{total}",
+        "weak_match": weak,
+        "weak_rate": f"{len(weak)}/{total}",
         "dup_card_samples": f"{dup_cards}/{samples}",
         "dup_food_samples": f"{dup_foods}/{samples}",
-        "ok": not no_price and not suspicious and dup_cards == 0,
+        "ok": (
+            not no_price
+            and not suspicious
+            and dup_cards == 0
+            and len(weak) <= total * 0.25
+        ),
     }
     return report
 
@@ -114,7 +121,10 @@ def main() -> None:
     print(f"- 价格覆盖：{report['price_coverage']}")
     if report["no_price"]:
         print(f"  · 无价格（会退化成裸关键词）：{', '.join(report['no_price'])}")
-    print(f"- 关键词兜底：{report['fallback_rate']}")
+    hit = report["cards"] - len(report["weak_match"])
+    print(f"- 关键词命中：{hit}/{report['cards']}（其余退到兜底匹配）")
+    if report["weak_match"]:
+        print(f"  · 弱匹配：{', '.join(report['weak_match'])}")
     if report["suspicious"]:
         print("- 疑似误映射（套餐/周边）：")
         for s in report["suspicious"]:

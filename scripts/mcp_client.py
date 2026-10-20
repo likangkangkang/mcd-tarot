@@ -188,11 +188,26 @@ def _pick_diverse(card: Dict[str, Any], menu: List[Dict[str, Any]], exclude: set
     ]
     same_cat = [
         it for it in pool
-        if cat in str(it.get("category") or "") or str(it.get("category") or "") in cat
+        if cat and str(it.get("category") or "")
+        and (cat in str(it["category"]) or str(it["category"]) in cat)
     ]
     if not same_cat:
         return None
     return min(same_cat, key=lambda it: (float(it.get("price") or 999), len(str(it["name"]))))
+
+
+def _tag(item: Dict[str, Any], how: str) -> Dict[str, Any]:
+    """复制一份并标注匹配方式，避免污染菜单原始数据。"""
+    out = dict(item)
+    out["_match"] = how
+    return out
+
+
+def _cheapest(pool: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    priced = [it for it in pool if it.get("price") is not None]
+    if not priced:
+        return None
+    return min(priced, key=lambda it: (float(it["price"]), len(str(it["name"]))))
 
 
 def resolve_item(
@@ -206,7 +221,9 @@ def resolve_item(
     - 同名优先，避免「巨无霸」被「巨无霸三件套」抢先；
     - 单品优先于套餐，塔罗指引落到「一道真实的餐品」而不是一份组合；
     - 非餐品（周边、贴纸、酱料）直接排除；
-    - exclude：已被本牌阵其它牌用掉的餐品名，先在同品类里换一道没用过的。
+    - exclude：已被本牌阵其它牌用掉的餐品名，先在同品类里换一道没用过的；
+    - 关键词全都没命中时（新店/小菜单/换季），退到同品类真实带价餐品，
+      宁可菜名不够贴切，也不给用户一个没有价格的裸关键词。
     """
     keywords = card.get("mcd_keywords") or []
     exclude = exclude or set()
@@ -214,6 +231,8 @@ def resolve_item(
         it for it in menu
         if it.get("name") and not NON_FOOD_PATTERN.search(str(it["name"]))
     ]
+    cat = str(card.get("mcd_category") or "")
+
     backup: Optional[Dict[str, Any]] = None
     bundle_backup: Optional[Dict[str, Any]] = None
     for kw in keywords:
@@ -234,21 +253,46 @@ def resolve_item(
             continue
         for it in singles:
             if str(it["name"]) == kw:
-                return it
-        return min(singles, key=lambda it: len(str(it["name"])))
+                return _tag(it, "keyword")
+        return _tag(min(singles, key=lambda it: len(str(it["name"]))), "keyword")
 
     # 关键词命中但都已被占用 → 同品类里换一道没用过的菜；没有就允许重样
     diverse = _pick_diverse(card, menu, exclude)
     if diverse:
-        return diverse
+        return _tag(diverse, "category")
     if bundle_backup:
-        return bundle_backup
+        return _tag(bundle_backup, "bundle")
     if backup:
-        return backup
-    # 退而求其次：用首个关键词当名字，价格留空
+        return _tag(backup, "repeat")
+
+    # 关键词全未命中：退到同品类真实带价餐品（小菜单 / 换季 / 新店）
+    same_cat = [
+        it for it in candidates
+        if cat and str(it.get("category") or "")
+        and (cat in str(it["category"]) or str(it["category"]) in cat)
+    ]
+    pick = _cheapest([it for it in same_cat if str(it["name"]) not in exclude]) or _cheapest(same_cat)
+    if pick:
+        return _tag(pick, "category-fallback")
+
+    # 连品类都对不上（菜单没带分类）：按牌号在菜单里轮转，别让所有牌都落到同一道菜
+    if candidates:
+        ordered = ([it for it in candidates if not BUNDLE_PATTERN.search(str(it["name"]))]
+                   + [it for it in candidates if BUNDLE_PATTERN.search(str(it["name"]))])
+        start = int(card.get("id") or 0) % len(ordered)
+        for i in range(len(ordered)):
+            it = ordered[(start + i) % len(ordered)]
+            if str(it["name"]) not in exclude and it.get("price") is not None:
+                return _tag(it, "menu-fallback")
+        pick = _cheapest([it for it in candidates if str(it["name"]) not in exclude])
+        if pick:
+            return _tag(pick, "menu-fallback")
+
+    # 菜单为空/无价格：用首个关键词当名字，价格留空
     fallback_name = next((k for k in keywords if k and k not in exclude), None)
     fallback_name = fallback_name or (keywords[0] if keywords else card.get("mcd_category", "麦麦餐品"))
-    return {"name": fallback_name, "code": None, "price": None, "category": card.get("mcd_category")}
+    return {"name": fallback_name, "code": None, "price": None, "category": card.get("mcd_category"),
+            "_match": "none"}
 
 
 if __name__ == "__main__":
