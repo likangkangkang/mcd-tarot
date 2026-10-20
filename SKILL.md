@@ -17,7 +17,7 @@ agent_created: true
 - WorkBuddy【连接器】中已启用 `mcd-mcp`（配置示例见 `assets/mcp-config.example.json`）。
 - 仅使用只读菜单工具；连接器暂不可用时自动回退内置示例菜单，解读体验不受影响。
 - 纯情绪与推荐，不涉及下单、地址、支付等写操作；不下单、不改任何数据。
-- 本地只在 `.cache/` 记住「上次门店 + 当日菜单」，不上传、不涉及隐私。
+- 本地只在 `~/.cache/mcd-tarot/` 记住「上次门店 + 当日菜单」，不上传、不涉及隐私。
 
 ## 路径约定
 下文所有相对路径均相对本 Skill 目录（用户级安装时为 `~/.workbuddy/skills/mcd-tarot/`）。临时文件（`raw.json`）写到系统临时目录即可，用完即弃；`menu.json` 建议直接走缓存，不必手动管理。

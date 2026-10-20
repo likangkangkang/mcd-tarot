@@ -15,7 +15,7 @@ mcd-tarot/
 │   └── tests/test_tarot_engine.py
 ├── references/         # README、MCP 集成说明、示例解读、参赛材料、本文件
 ├── assets/             # 配置模板：mcp-config.example.json、.env.example、requirements.txt
-└── .cache/             # 本地运行时缓存（门店 + 当日菜单），不入 git
+└── (运行时缓存不在本目录：~/.cache/mcd-tarot/)
 ```
 
 ## 更新方式（单份代码，无需覆盖）
@@ -31,10 +31,10 @@ git add -A && git commit -m "..." && git push
 ```
 
 ## 本地运行时数据
-- `.cache/store.json`：上次门店（storeCode + 门店名 + 城市），用于免去每次询问。
-- `.cache/menus/menu-<store>-<date>.json`：当日菜单缓存，同一天只拉一次连接器。
+- 位置：`~/.cache/mcd-tarot/`（可用 `MCD_TAROT_CACHE` 覆盖），不放在 skill 目录，也不会被打包/提交。
+- `store.json`：上次门店（storeCode + 门店名 + 城市），用于免去每次询问。
+- `menus/menu-<store>-<date>.json`：当日菜单缓存，同一天只拉一次连接器。
 - 清理：`python3 scripts/cache.py clear --all`；只清门店：`--what store`。
-- 这些文件已在 `.gitignore` 中，不会被提交。
 
 ## 自检
 ```bash

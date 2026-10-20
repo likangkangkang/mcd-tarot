@@ -20,7 +20,7 @@
 - 代码零第三方重依赖，标准库即可运行，易于在 WorkBuddy 环境复现与评审。
 
 ## 4. 验证方式
-- `python tarot_deck.py`：确认 78 张牌组构建正确。
-- `python tarot_engine.py --spread today|trinity|timeline`：三种牌阵均产出完整情绪化解读。
+- `python3 scripts/tarot_deck.py`：确认 78 张牌组构建正确。
+- `python3 scripts/tarot_engine.py --spread today|choice|trinity|timeline`：各牌阵均产出完整情绪化解读。
 - 同日复现性、各牌阵独立性已通过断言验证（见 `tests/`）。
 - 无 Token 时自动回退示例菜单，演示零门槛。

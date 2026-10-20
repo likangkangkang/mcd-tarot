@@ -20,13 +20,15 @@
 - **情绪价值优先**：无论正位逆位，收束都落在「允许、休息、被爱、被看见」，绝不制造焦虑。
 - **永远可演示**：没配 Token 也能跑（自动回退示例菜单），体验不打折。
 
-## 🎴 三种牌阵
+## 🎴 玩法
 
-| 牌阵 | 适合 | 抽几张 |
+| 玩法 | 适合 | 抽几张 |
 |---|---|---|
 | `today` 今日宜吃 | 一句话决定今天吃啥 | 1 张 |
+| `choice` 三选一 | 选择困难，想让牌给三个选项 | 3 张 |
 | `trinity` 身·心·灵 三餐 | 想被全方位关照 | 3 张 |
 | `timeline` 过去·现在·未来 | 想看清一段状态 | 3 张 |
+| `--week` 本周餐单 | 一次安排好一周七顿 | 7 张 |
 
 ## 🚀 快速开始
 
@@ -41,27 +43,35 @@
 ### 方式二：命令行 / 脚本
 ```bash
 # 无需任何第三方依赖（仅 Python 标准库）
-python tarot_engine.py --spread today --mood "加班到很晚，有点丧"
-python tarot_engine.py --spread trinity
-python tarot_engine.py --spread timeline --date 2026-10-16
+python3 scripts/tarot_engine.py --spread today --mood "加班到很晚，有点丧"
+python3 scripts/tarot_engine.py --spread choice --mood "选择困难"
+python3 scripts/tarot_engine.py --spread timeline --date 2026-10-16
+python3 scripts/tarot_engine.py --week                    # 本周餐单
+python3 scripts/tarot_engine.py --spread today --card-svg card.svg   # 可分享卡片
 
 # 想用真实菜单（需要 Token）：通过环境变量传入
 export MCD_MCP_TOKEN=你的Token
-python tarot_engine.py --spread today
+python3 scripts/tarot_engine.py --spread today
 ```
 > 直连脚本复用 `mcp_client.py`，真实菜单优先；无 Token 或网络失败自动回退示例菜单。
+> 在 WorkBuddy 内更推荐走连接器 + 本地缓存（见 `INSTALL.md`）。
 
 ## 📂 文件结构
 ```
 mcd-tarot/
-├── SKILL.md                 # WorkBuddy 技能定义
-├── tarot_deck.py            # 78 张牌组 + 麦当劳映射 + 情绪寄语（可离线单测）
-├── tarot_engine.py          # 塔罗引擎：确定性抽签 / 牌阵 / 菜单映射 / 情绪化输出
-├── mcp_client.py            # 仅标准库的 mcd-mcp 客户端（真实菜单优先，回退示例）
-├── tests/                   # 单元测试
-├── examples/sample_reading.md  # 完整示例解读
-├── README.md / MCP_INTEGRATION.md / workbuddy.md
-└── mcp-config.example.json  # 连接器配置（仅 ${MCD_MCP_TOKEN} 占位）
+├── SKILL.md                 # WorkBuddy 技能定义与工作流
+├── scripts/
+│   ├── tarot_deck.py        # 78 张牌组 + 麦当劳映射 + 情绪寄语（可离线单测）
+│   ├── tarot_engine.py      # 引擎：确定性抽签 / 牌阵 / 三选一 / 本周餐单 / 卡片
+│   ├── mcp_client.py        # 仅标准库的 mcd-mcp 客户端（真实菜单优先，回退示例）
+│   ├── menu_from_connector.py  # query-meals 返回 → 引擎菜单（可写缓存）
+│   ├── cache.py             # 门店记忆 + 当日菜单缓存
+│   ├── selfcheck.py         # 换季自检（价格覆盖 / 误映射 / 重复牌）
+│   ├── card_svg.py          # 可分享竖版卡片（SVG）
+│   └── tests/               # 单元测试
+├── references/              # README / MCP 集成说明 / 示例解读 / 安装维护 / 参赛材料
+├── assets/                  # 连接器配置模板、环境变量示例、requirements
+└── .cache/                  # 运行时缓存（不入库）
 ```
 
 ## 🍟 与麦当劳 MCP 的关系

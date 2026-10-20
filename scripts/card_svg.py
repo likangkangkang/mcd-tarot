@@ -45,6 +45,7 @@ def _wrap(text: str, width: int = 17, max_lines: int = 4) -> List[str]:
     while text and len(lines) < max_lines:
         if len(text) <= width:
             lines.append(text)
+            text = ""
             break
         cut = width
         while cut > 1 and text[cut] in PUNCT:

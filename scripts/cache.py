@@ -9,10 +9,11 @@
 
 缓存位置
 --------
-默认 `<skill>/.cache/`（可用环境变量 `MCD_TAROT_CACHE` 覆盖），不入 git：
+默认 `~/.cache/mcd-tarot/`（可用环境变量 `MCD_TAROT_CACHE` 覆盖），不放在 skill 目录里，
+避免和代码混在一起、也不会被打包带走：
 
-    .cache/store.json                      # 上次门店
-    .cache/menus/menu-<store>-<date>.json  # 当日菜单
+    ~/.cache/mcd-tarot/store.json                      # 上次门店
+    ~/.cache/mcd-tarot/menus/menu-<store>-<date>.json  # 当日菜单
 
 CLI
 ---
@@ -37,9 +38,9 @@ SKILL_ROOT = Path(__file__).resolve().parent.parent
 
 
 def cache_dir() -> Path:
-    """缓存根目录：环境变量优先，默认 skill 下 .cache。"""
+    """缓存根目录：环境变量优先，默认 ~/.cache/mcd-tarot。"""
     env = os.environ.get("MCD_TAROT_CACHE")
-    root = Path(env).expanduser() if env else SKILL_ROOT / ".cache"
+    root = Path(env).expanduser() if env else Path.home() / ".cache" / "mcd-tarot"
     (root / "menus").mkdir(parents=True, exist_ok=True)
     return root
 
