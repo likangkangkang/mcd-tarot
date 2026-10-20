@@ -22,10 +22,10 @@ quick.py 只用本地缓存做三件事：读门店 → 读当日菜单 → 读�
 用法
 ----
     python3 scripts/quick.py                          # 今日一张
-    python3 scripts/quick.py --spread trinity         # 身心灵三张
+    python3 scripts/quick.py --question "明天面试能顺利吗"   # 按问题抽一张预测
     python3 scripts/quick.py --mood "想被哄一下"       # 带心情
     python3 scripts/quick.py --at "2026-10-20 12:30"  # 指定点餐时间
-    python3 scripts/quick.py --svg card.svg           # 同时出牌面（多牌阵也只在一张画布上）
+    python3 scripts/quick.py --svg card.svg           # 同时出牌面（单张）
     python3 scripts/quick.py --inline                 # 把牌面 SVG 打到 stdout（内联进对话框用）
     python3 scripts/quick.py --lean                   # 精简文字（清单/形态/价格交给牌面图）
     python3 scripts/quick.py --json out.json          # 结构化结果
@@ -48,16 +48,17 @@ import tarot_engine
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="麦麦塔罗牌 · 零网络快速抽牌")
-    ap.add_argument("--spread", default="today",
-                    choices=["today", "trinity", "choice", "timeline"])
+    ap = argparse.ArgumentParser(description="麦麦塔罗牌 · 零网络快速抽牌（单张预测）")
+    ap.add_argument("--spread", default="today", choices=["today"],
+                    help="牌阵（当前仅支持单张预测 today）")
     ap.add_argument("--date", default=None, help="YYYY-MM-DD，默认今天")
     ap.add_argument("--at", default=None, help='点餐时间 "YYYY-MM-DD HH:MM"，默认现在')
     ap.add_argument("--mood", default=None, help="今天的心情")
-    ap.add_argument("--week", action="store_true", help="出本周餐单")
-    ap.add_argument("--svg", default=None, help="同时生成牌面 SVG 的路径（多牌阵拼成一张）")
+    ap.add_argument("--question", default=None,
+                    help="你关心的问题；给出时牌作为这个问题的回答，不同问题抽到不同牌")
+    ap.add_argument("--svg", default=None, help="同时生成牌面 SVG 的路径（单张）")
     ap.add_argument("--inline", action="store_true",
-                    help="把牌面 SVG（宽 680，多张拼成一张）打到 stdout，供内联呈现在对话框")
+                    help="把牌面 SVG（宽 680，单张）打到 stdout，供内联呈现在对话框")
     ap.add_argument("--lean", action="store_true",
                     help="精简文字：清单/形态/价格交给牌面图，文字只留解读与行动引导")
     ap.add_argument("--png", default=None, help="同时生成牌面 PNG（需要 Chrome，慢约 1–2 秒）")
@@ -104,13 +105,10 @@ def main() -> None:
     mark("画像")
 
     combo_first = not args.single_only
-    if args.week:
-        result = tarot_engine.do_week_reading(
-            args.date, args.mood, menu=menu, profile=prof, combo_first=combo_first)
-    else:
-        result = tarot_engine.do_reading(
-            args.spread, args.date, args.mood, menu=menu,
-            at=args.at, profile=prof, combo_first=combo_first, lean=args.lean)
+    result = tarot_engine.do_reading(
+        args.spread, args.date, args.mood, menu=menu,
+        at=args.at, profile=prof, combo_first=combo_first,
+        lean=args.lean, question=args.question)
     mark("抽牌")
 
     if args.inline:

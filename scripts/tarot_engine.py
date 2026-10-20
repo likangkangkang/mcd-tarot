@@ -1,18 +1,20 @@
 """麦麦塔罗牌 · 塔罗引擎。
 
 把 78 张塔罗牌与麦当劳餐盘连接：按「日期」做确定性抽签（同一天结果稳定），
-支持多种牌阵与正/逆位，把每张牌映射到真实麦当劳单品，并产出温暖的情绪化解读。
+每次只抽**一张牌**、只出**一张图**——专为「一张图预测」场景设计。
+可选传入 question（你关心的问题），牌会作为这个问题的回答，且不同问题抽到不同牌。
 
 用法
 ----
-    python tarot_engine.py --spread today
-    python tarot_engine.py --spread timeline --mood "有点累"
-    python tarot_engine.py --spread trinity --date 2026-10-16
-    python tarot_engine.py --spread today --menu-file menu.json   # 注入 mcd-mcp 连接器真实菜单
+    python tarot_engine.py                       # 今日一张（今日宜吃）
+    python tarot_engine.py --mood "有点累"
+    python tarot_engine.py --question "明天面试能顺利吗"
+    python tarot_engine.py --menu-file menu.json   # 注入 mcd-mcp 连接器真实菜单
 
 作为库：
     from tarot_engine import do_reading
-    result = do_reading("today")          # 返回含 markdown 的 dict
+    result = do_reading()                        # 今日一张，返回含 markdown 的 dict
+    result = do_reading(question="明天面试能顺利吗")
     print(result["markdown"])
 """
 
@@ -34,21 +36,10 @@ import combo_detail
 import tarot_sense
 from mcp_client import get_menu, resolve_item
 
-# 牌阵定义：key -> (中文名, 位置标签列表)
+# 牌阵定义：本技能只做「单张预测」一种场景。
+# key -> (中文名, 单张位置标签)
 SPREADS: Dict[str, Tuple[str, List[str]]] = {
     "today": ("今日宜吃", ["今天，宇宙建议你吃"]),
-    "timeline": (
-        "过去 · 现在 · 未来",
-        ["过去 · 你带着什么走来", "现在 · 你正需要什么", "未来 · 你将被怎样治愈"],
-    ),
-    "trinity": (
-        "身 · 心 · 灵 三餐",
-        ["给身体的一口（落地与能量）", "给心灵的一口（情绪与温柔）", "给关系的一口（连接与分享）"],
-    ),
-    "choice": (
-        "三选一 · 三道菜，你挑一个",
-        ["选项 A", "选项 B", "选项 C"],
-    ),
 }
 
 REVERSED_CHANCE = 0.3  # 逆位概率
@@ -250,21 +241,22 @@ def _draw_one(rng: random.Random) -> Tuple[Dict, str]:
     return card, orientation
 
 
-def draw(spread_key: str, date_str: str, reversed_chance: float = REVERSED_CHANCE):
-    """返回 [(card, orientation, position), ...]；同日可复现。"""
+def draw(spread_key: str = "today", date_str: str = "", salt: str = "",
+         reversed_chance: float = REVERSED_CHANCE):
+    """抽**一张**牌，返回 [(card, orientation, position)]（固定一张）。
+
+    salt 用于区分不同问题 / 场景：同日期、同 salt 可复现；换 salt（如不同问题）
+    会抽到不同的牌，让「一张图预测」能服务任意提问而不总是同一张。
+    """
     if spread_key not in SPREADS:
         raise ValueError(f"未知牌阵: {spread_key}，可选: {list(SPREADS)}")
     _, positions = SPREADS[spread_key]
-    base = f"{date_str}|{spread_key}"
+    base = f"{date_str}|{salt or spread_key}"
     rng = random.Random(daily_seed(base))
     rng_reversed = random.Random(daily_seed(base + ":rev"))
-    # 同一牌阵内不放回发牌，更接近真实牌阵（原实现可能抽到重复牌）
-    cards = rng.sample(tarot_deck.ALL_CARDS, len(positions))
-    out = []
-    for card, pos in zip(cards, positions):
-        orientation = "rev" if rng_reversed.random() < reversed_chance else "up"
-        out.append((card, orientation, pos))
-    return out
+    card = rng.choice(tarot_deck.ALL_CARDS)
+    orientation = "rev" if rng_reversed.random() < reversed_chance else "up"
+    return [(card, orientation, positions[0])]
 
 
 def _fmt_price(price) -> str:
@@ -279,13 +271,25 @@ def _fmt_price(price) -> str:
     return f"¥{p:.1f}"
 
 
-def _mood_opening(mood: Optional[str], spread_name: str) -> str:
+def _mood_opening(mood: Optional[str], spread_name: str, question: Optional[str] = None) -> str:
     base = f"# 🔮 麦麦塔罗牌 · {spread_name}\n"
-    if mood:
-        base += f"\n> 你今天的心情是：「{mood}」。塔罗听见了，下面是为你抽出的牌。\n"
+    if question:
+        q = question.strip()
+        if mood:
+            base += f"\n> 你问：「{q}」\n> 你今天的心情是：「{mood}」。塔罗翻开一张牌，给你一个回答。\n"
+        else:
+            base += f"\n> 你问：「{q}」\n> 塔罗翻开一张牌，给你一个回答。\n"
     else:
-        base += "\n> 把今天的疲惫交给牌面，看看麦麦想请你吃点什么。\n"
+        if mood:
+            base += f"\n> 你今天的心情是：「{mood}」。塔罗听见了，下面是为你抽出的牌。\n"
+        else:
+            base += "\n> 把今天的疲惫交给牌面，看看麦麦想请你吃点什么。\n"
     return base
+
+
+def _norm_question(q: str) -> str:
+    """把问题归一化（去空白/标点/大小写），让同一个问题的签文稳定可复现。"""
+    return re.sub(r"\s+", "", q.strip().lower())
 
 
 def do_reading(
@@ -298,6 +302,7 @@ def do_reading(
     profile: Optional[Dict] = None,
     combo_first: bool = True,
     lean: bool = False,
+    question: Optional[str] = None,
 ) -> Dict:
     """生成一次完整解读，返回含 markdown 的字典。
 
@@ -319,7 +324,17 @@ def do_reading(
         now = datetime.now()
     date_str = date_str or now.date().isoformat()
     period = period_of(now)
-    spread_name = SPREADS[spread_key][0]
+
+    # 单张预测场景：有 question 时，牌作为这个问题的回答，且按问题做种子（不同问题→不同牌）
+    if question:
+        salt = "ask|" + _norm_question(question)
+        spread_name = "塔罗预测"
+        position_label = "牌对你的回答"
+    else:
+        salt = spread_key
+        spread_name = SPREADS[spread_key][0]
+        position_label = SPREADS[spread_key][1][0]
+
     if menu is None:
         menu = get_menu(token)
     if profile is None:
@@ -329,10 +344,12 @@ def do_reading(
         except Exception:  # noqa: BLE001 - 画像是增强项，坏了不影响解读
             profile = None
     is_fallback = menu is mcp_client.FALLBACK_MENU
-    drawn = draw(spread_key, date_str)
+    drawn = draw(spread_key, date_str, salt=salt)
+    # 位置标签随「今日/提问」切换
+    drawn = [(card, orientation, position_label) for card, orientation, _ in drawn]
 
     cards_block: List[Dict] = []
-    lines: List[str] = [_mood_opening(mood, spread_name)]
+    lines: List[str] = [_mood_opening(mood, spread_name, question=question)]
     if not lean:
         lines.append(f"> ⏰ 现在是{period['name']}（{period['time']}）：{period['hint']}。\n")
     used_foods: set = set()
@@ -496,8 +513,6 @@ def do_reading(
     if lean:
         # 精简收尾：重心全部压在下一步操作上
         lines.append("\n---\n")
-        if spread_key == "choice":
-            lines.append("三道菜都摆在牌上了。跟着第一眼心动的那一个走——通常那就是你真正想要的。")
         lines.append("👉 回「**就它**」，我帮你核对实时价格并下单——付款链接你自己打开，钱我不碰。")
         lines.append("\n*餐品供应与价格以麦当劳官方实时为准。*")
     else:
@@ -507,24 +522,10 @@ def do_reading(
             lines.extend(saving_lines)
             if total_saving >= 0.5:
                 lines.append(f"\n**合计可省约 ¥{_fmt_price(total_saving)[1:]}**（券以结算页实际可用为准）")
-            combo_count = sum(1 for c in cards_block if c.get("form") in ("combo", "share"))
-            if combo_count:
-                lines.append(
-                    f"> 这 {len(cards_block)} 张牌里给你配了 {combo_count} 份套餐："
-                    "套餐自带的立减和满减券可以叠着用，比自己一样样点更省。"
-                )
             if claim_note:
                 lines.append(f"> {claim_note}")
             if combo_note:
                 lines.append(f"> {combo_note}")
-
-        # 三选一：把选择权交还用户
-        if spread_key == "choice":
-            lines.append("\n---\n")
-            lines.append(
-                "三道菜都是今天可以吃的，牌只是在帮你排序。"
-                "跟着第一眼心动的那一个走——通常那就是你真正想要的。"
-            )
 
         # 结尾情绪寄语
         lines.append("\n---\n")
@@ -541,6 +542,7 @@ def do_reading(
     return {
         "spread": spread_key,
         "spread_name": spread_name,
+        "question": question,
         "date": date_str,
         "mood": mood,
         "period": period,
@@ -552,126 +554,16 @@ def do_reading(
     }
 
 
-WEEKDAYS = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
-
-
-def _short_message(text: str, limit: int = 22) -> str:
-    """取情绪寄语的第一句，作为周餐单里的一行短句。"""
-    first = re.split(r"[。；;\n]", (text or "").strip())[0].strip()
-    return first if len(first) <= limit else first[:limit] + "…"
-
-
-def do_week_reading(
-    start_date: Optional[str] = None,
-    mood: Optional[str] = None,
-    token: Optional[str] = None,
-    menu: Optional[List[Dict]] = None,
-    profile: Optional[Dict] = None,
-    combo_first: bool = True,
-) -> Dict:
-    """本周餐单：周一至周日各一张牌、一道菜，尽量不重样。
-
-    start_date 为本周任意一天（默认今天），自动对齐到本周周一。
-    combo_first 默认给套餐（配得齐、也更容易吃到立减与满减券）。
-    """
-    base_day = date.fromisoformat(start_date) if start_date else date.today()
-    monday = base_day - timedelta(days=base_day.weekday())
-
-    if menu is None:
-        menu = get_menu(token)
-    if profile is None:
-        try:
-            import profile as profile_mod
-            profile = profile_mod.load_profile()
-        except Exception:  # noqa: BLE001
-            profile = None
-    is_fallback = menu is mcp_client.FALLBACK_MENU
-
-    lines: List[str] = ["# 🗓 麦麦塔罗牌 · 本周餐单\n"]
-    if mood:
-        lines.append(f"> 这周的心情底色：「{mood}」。先把吃饭安排好，别的事慢慢来。\n")
-    else:
-        lines.append("> 一周七天，先替你把「吃什么」想好。牌是参考，胃口归你。\n")
-    lines.append("| 日期 | 牌（正/逆） | 麦麦指引 | 一句话 |")
-    lines.append("|---|---|---|---|")
-
-    used_foods: set = set()
-    days: List[Dict] = []
-    for i in range(7):
-        d = monday + timedelta(days=i)
-        d_str = d.isoformat()
-        card, orientation, _pos = draw("today", d_str)[0]
-        combo_up = mcp_client.combo_option(card, menu, exclude=used_foods,
-                                           profile=profile) if combo_first else None
-        item = resolve_item(card, menu, exclude=used_foods, profile=profile,
-                            prefer_form="combo" if combo_first else None)
-        if combo_up and mcp_client._form(item) not in ("combo", "share"):
-            item = mcp_client.finalize_item(combo_up, profile, match="combo-upgrade")
-        name = str(item.get("name"))
-        used_foods.add(name)
-        price = _fmt_price(item.get("price"))
-        deal = item.get("deal") or None
-        price_cell = f"**{name}**{' ' + price if price else ''}"
-        if deal:
-            price_cell += f" 🎟省¥{_fmt_price(deal['saving'])[1:]}"
-        message = card["emotion_rev"] if orientation == "rev" else card["emotion_up"]
-        ori = "逆位" if orientation == "rev" else "正位"
-        detail = combo_detail.describe(item, menu) if mcp_client._form(item) in ("combo", "share") else None
-        lines.append(
-            f"| {d.strftime('%m-%d')} {WEEKDAYS[i]} | {card['name_cn']} · {ori} | "
-            f"**{name}**{' ' + price if price else ''} | {_short_message(message)} |"
-        )
-        days.append({
-            "date": d_str,
-            "weekday": WEEKDAYS[i],
-            "card_cn": card["name_cn"],
-            "card_en": card["name_en"],
-            "orientation": ori,
-            "food": name,
-            "price": price,
-            "form": mcp_client._form(item),
-            "combo_items": (detail or {}).get("items") or [],
-            "combo_detail": (detail or {}).get("text") or "",
-            "combo_detail_source": (detail or {}).get("source") or "",
-            "combo_detail_note": (detail or {}).get("note") or "",
-            "message": message,
-        })
-
-    bundle_lines = [f"- {x['weekday']} · **{x['food']}**：{x['combo_detail']}"
-                    for x in days if x.get("combo_detail")]
-    if bundle_lines:
-        lines.append("\n**这周套餐里都装了什么**（以结算页实际配置为准）\n")
-        lines.extend(bundle_lines)
-        lines.append("")
-
-    lines.append("\n---\n")
-    lines.append(
-        "不用每顿都吃对，能按时吃上就已经很好。"
-        "餐品供应与价格以麦当劳官方实时为准，想换某一天就重抽那一张。🥤"
-    )
-
-    return {
-        "mode": "week",
-        "spread": "week",
-        "spread_name": f"本周餐单（{monday.isoformat()} 起）",
-        "date": monday.isoformat(),
-        "mood": mood,
-        "menu_source": "fallback" if is_fallback else "real(mcd-mcp)",
-        "profile_used": bool(profile),
-        "days": days,
-        "cards": [],
-        "markdown": "\n".join(lines),
-    }
-
-
 def _menu_source_label(token: Optional[str], menu) -> str:
     return "真实菜单(mcd-mcp)" if not (menu is mcp_client.FALLBACK_MENU) else "静态示例菜单"
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="麦麦塔罗牌塔罗引擎")
-    ap.add_argument("--spread", choices=list(SPREADS), default="today", help="牌阵")
-    ap.add_argument("--week", action="store_true", help="输出本周餐单（周一至周日）")
+    ap = argparse.ArgumentParser(description="麦麦塔罗牌塔罗引擎（单张预测）")
+    ap.add_argument("--spread", choices=list(SPREADS), default="today",
+                    help="牌阵（当前仅支持单张预测 today）")
+    ap.add_argument("--question", default=None,
+                    help="你关心的问题；给出时牌作为这个问题的回答，不同问题抽到不同牌")
     ap.add_argument("--mood", default=None, help="今天的心情（可选，用于个性化开场）")
     ap.add_argument("--date", default=None, help="指定日期 YYYY-MM-DD（默认今天）")
     ap.add_argument("--at", default=None,
@@ -683,9 +575,9 @@ def main() -> None:
     ap.add_argument("--no-cache", action="store_true", help="不使用本地门店/菜单缓存")
     ap.add_argument("--json", dest="json_out", default=None, help="把解读结果写成 JSON 文件")
     ap.add_argument("--card-svg", default=None,
-                    help="生成塔罗牌面卡片（SVG 路径；多牌阵也只在一张画布上横排拼合）")
+                    help="生成塔罗牌面卡片（SVG 路径；单张牌面）")
     ap.add_argument("--inline", default=None,
-                    help="渲染可内联到对话框的牌面 SVG（宽 680，多张拼成一张）。"
+                    help="渲染可内联到对话框的牌面 SVG（宽 680，单张）。"
                          "写文件给路径；要直接打 stdout 就传 -")
     ap.add_argument("--lean", action="store_true",
                     help="精简文字：清单/形态/价格交给牌面图，文字只留解读与行动引导")
@@ -726,13 +618,9 @@ def main() -> None:
         except Exception:  # noqa: BLE001 - 缓存只是优化，坏了不影响解读
             menu = None
 
-    if args.week:
-        result = do_week_reading(args.date, args.mood, token, menu=menu, profile=profile,
-                                 combo_first=combo_first)
-    else:
-        result = do_reading(args.spread, args.date, args.mood, token, menu=menu,
-                            at=args.at, profile=profile, combo_first=combo_first,
-                            lean=args.lean)
+    result = do_reading(args.spread, args.date, args.mood, token, menu=menu,
+                        at=args.at, profile=profile, combo_first=combo_first,
+                        lean=args.lean, question=args.question)
 
     print(result["markdown"])
     print(f"\n[菜单来源] {result['menu_source']}　[口味画像] {'已使用' if result.get('profile_used') else '未使用'}")

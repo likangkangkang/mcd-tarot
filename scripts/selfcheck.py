@@ -4,8 +4,8 @@
 ------
 1. **价格覆盖**：78 张牌能否在菜单里匹配到带价格的真实餐品（匹配不到 = 用户会看到裸关键词）。
 2. **误映射**：是否落到了周边/玩具这类非餐品（如「薯条 → 薯条脆卜卜毛绒周边」）。
-3. **重复牌**：三张牌阵在同一天是否抽到同一张牌（不应发生）。
-4. **菜品重复**：三张牌阵是否给出同一道菜（尽量不重样）。
+3. **重复牌**：单张抽签在采样天数内是否抽到同一张牌（不应发生）。
+4. **菜品重复**：每张牌是否独立落到一个具体餐品。
 5. **关键词命中率**：有多少张牌靠的是兜底关键词而非真实菜品。
 
 用法
@@ -63,27 +63,26 @@ def run(menu: List[Dict[str, Any]], days: int) -> Dict[str, Any]:
         if item.get("_match") in ("category-fallback", "menu-fallback", "none"):
             weak.append(f"{card['name_cn']} → {name}")
 
-    spreads = ["trinity", "timeline", "choice"]
+    # 单张预测：抽 N 天、验证每天都能抽到一张、且能落到一个带价格的餐品
     dup_cards = 0
     dup_foods = 0
     samples = 0
     d0 = date.today()
     for i in range(days):
         d = (d0 + timedelta(days=i)).isoformat()
-        for sp in spreads:
-            drawn = tarot_engine.draw(sp, d)
-            ids = [c["id"] for c, _o, _p in drawn]
-            samples += 1
-            if len(ids) != len(set(ids)):
-                dup_cards += 1
-            used: set = set()
-            foods: List[Any] = []
-            for c, _o, _p in drawn:
-                f = mcp_client.resolve_item(c, menu, exclude=used).get("name")
-                foods.append(f)
-                used.add(str(f))
-            if len(set(foods)) != len(foods):
-                dup_foods += 1
+        drawn = tarot_engine.draw("today", d)
+        ids = [c["id"] for c, _o, _p in drawn]
+        samples += 1
+        if len(ids) != len(set(ids)):
+            dup_cards += 1
+        used: set = set()
+        foods: List[Any] = []
+        for c, _o, _p in drawn:
+            f = mcp_client.resolve_item(c, menu, exclude=used).get("name")
+            foods.append(f)
+            used.add(str(f))
+        if len(set(foods)) != len(foods):
+            dup_foods += 1
 
     total = len(tarot_deck.ALL_CARDS)
     with_image = sum(1 for it in menu if it.get("image"))
@@ -134,9 +133,8 @@ def main() -> None:
         print("- 疑似误映射（周边/玩具）：")
         for s in report["suspicious"]:
             print(f"  · {s['card']} → {s['food']}")
-    print(f"- 重复牌：{report['dup_card_samples']}（{args.days} 天 × 3 牌阵）")
-    print(f"- 同阵重复菜品：{report['dup_food_samples']}"
-          "（套餐优先后，套餐少的门店容易三张牌撞同一份，换完整菜单会低很多）")
+    print(f"- 重复牌：{report['dup_card_samples']}（{args.days} 天单张抽签）")
+    print(f"- 同日重复菜品：{report['dup_food_samples']}（每张牌独立落到一个餐品）")
 
     if report["ok"]:
         print("\n结论：牌面映射健康，可以放心抽。")

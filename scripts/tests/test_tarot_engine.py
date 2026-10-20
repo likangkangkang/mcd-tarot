@@ -41,10 +41,11 @@ def test_all_cards_have_required_fields():
 
 def test_deterministic_same_day():
     d = "2026-10-16"
-    a = tarot_engine.draw("trinity", d)
-    b = tarot_engine.draw("trinity", d)
+    a = tarot_engine.draw("today", d)
+    b = tarot_engine.draw("today", d)
     assert [x[0]["id"] for x in a] == [x[0]["id"] for x in b]
     assert [x[1] for x in a] == [x[1] for x in b]
+    assert len(a) == 1, "单张预测每次只抽一张"
 
 
 def test_different_date_different_draw():
@@ -55,7 +56,7 @@ def test_different_date_different_draw():
 
 
 def test_orientation_valid():
-    for _, ori, _ in tarot_engine.draw("timeline", "2026-10-16"):
+    for _, ori, _ in tarot_engine.draw("today", "2026-10-16"):
         assert ori in ("up", "rev")
 
 
@@ -91,19 +92,25 @@ def test_do_reading_markdown_offline():
     assert r["spread"] == "today"
 
 
-def test_do_reading_all_spreads():
-    for spread in ("today", "trinity", "timeline"):
-        r = tarot_engine.do_reading(spread, "2026-10-16", token=None)
-        assert r["cards"], f"{spread} 应至少抽到一张"
-        assert len(r["cards"]) == {"today": 1, "trinity": 3, "timeline": 3}[spread]
+def test_do_reading_single_card():
+    """单张预测：永远只抽一张牌，且能落到一个具体餐品。"""
+    r = tarot_engine.do_reading("today", "2026-10-16", token=None)
+    assert len(r["cards"]) == 1
+    assert r["cards"][0]["food"], "应给出具体食物"
+    assert r["spread"] == "today"
 
 
-def test_no_duplicate_cards_in_multi_spread():
-    """同一牌阵内不应出现重复牌（真实牌阵不放回发牌）。"""
-    for spread in ("trinity", "timeline"):
-        for d in ("2026-01-07", "2026-01-21", "2026-02-07", "2026-10-16", "2026-12-31"):
-            ids = [c[0]["id"] for c in tarot_engine.draw(spread, d)]
-            assert len(ids) == len(set(ids)), f"{spread} {d} 出现重复牌: {ids}"
+def test_question_seed_varies_card():
+    """不同问题（同日）应抽到不同的牌；同一问题（同日）应稳定。"""
+    d = "2026-10-16"
+    qs = ["明天面试能顺利吗", "今天会发财吗", "晚上要不要去跑步", "ta还喜欢我吗", "周末去哪玩"]
+    cards = {tarot_engine.draw("today", d, salt="ask|" + tarot_engine._norm_question(q))[0][0]["id"]
+             for q in qs}
+    assert len(cards) >= 2, f"不同问题应抽到不同牌，实际: {cards}"
+    # 同一问题稳定可复现
+    a = tarot_engine.draw("today", d, salt="ask|x")[0][0]["id"]
+    b = tarot_engine.draw("today", d, salt="ask|x")[0][0]["id"]
+    assert a == b
 
 
 def test_resolve_prefers_exact_name():
@@ -138,37 +145,15 @@ def test_all_major_cards_have_priced_match():
     assert not missing, f"未匹配到价格的牌: {missing}"
 
 
-def test_spreads_have_food_names():
-    """三张牌阵的每张牌都应给出餐品名（可为关键词兜底），不出现空名。"""
-    for spread in ("trinity", "timeline", "choice"):
-        r = tarot_engine.do_reading(spread, "2026-10-16", token=None)
-        for c in r["cards"]:
-            assert c["food"], f"{spread} 存在空餐品: {c}"
+def test_single_card_has_food_name():
+    """单张预测的牌应给出餐品名（可为关键词兜底），不出现空名。"""
+    r = tarot_engine.do_reading("today", "2026-10-16", token=None)
+    assert r["cards"][0]["food"], "存在空餐品"
 
 
-def test_choice_spread_offers_three_distinct_foods():
-    """三选一：三张牌应尽量落到三道不同的菜，而不是同一杯可乐复制三份。"""
-    menu = [
-        {"name": "可乐", "price": 9.5, "category": "饮品"},
-        {"name": "麦辣鸡翅", "price": 14.5, "category": "辣味炸鸡"},
-        {"name": "巨无霸", "price": 26.0, "category": "汉堡"},
-        {"name": "巨无霸三件套", "price": 37.0, "category": "汉堡"},
-        {"name": "薯条脆卜卜毛绒周边", "price": 29.9, "category": "小食甜品/其他"},
-    ]
-    for day in ("2026-10-16", "2026-10-17", "2026-10-18", "2026-10-19", "2026-10-20"):
-        r = tarot_engine.do_reading("choice", day, menu=menu)
-        foods = [c["food"] for c in r["cards"]]
-        assert len(foods) == 3, foods
-        assert "薯条脆卜卜毛绒周边" not in foods, "周边不应被当作餐品"
-
-
-def test_week_reading_covers_seven_days():
-    r = tarot_engine.do_week_reading("2026-10-21")  # 周三 → 应对齐到周一
-    assert len(r["days"]) == 7, r["days"]
-    assert r["days"][0]["date"] == "2026-10-19", r["days"][0]   # 周一
-    assert r["days"][-1]["date"] == "2026-10-25", r["days"][-1]  # 周日
-    assert all(d["food"] for d in r["days"]), "每天都应有餐品"
-    assert "本周餐单" in r["markdown"]
+def test_week_reading_removed():
+    """周餐单已移除，确认接口不再存在。"""
+    assert not hasattr(tarot_engine, "do_week_reading"), "do_week_reading 应已删除"
 
 
 def test_single_item_preferred_over_bundle():
@@ -390,7 +375,7 @@ def test_resolve_prefers_familiar_alternative():
 def test_reading_shows_saving_and_taste():
     """带画像的解读应出现「合你口味」「用券」「更省」这类行。"""
     prof = _sample_profile()
-    r = tarot_engine.do_reading("trinity", "2026-10-20", "想省钱", menu=_MENU,
+    r = tarot_engine.do_reading("today", "2026-10-20", "想省钱", menu=_MENU,
                                 at="2026-10-20 15:00", profile=prof)
     assert r["profile_used"] is True
     assert r["cards"] and "price_raw" in r["cards"][0]
@@ -488,7 +473,7 @@ def test_combo_first_raises_combo_share():
     def combo_share(combo_first):
         hit = total = 0
         for day in range(1, 21):
-            r = tarot_engine.do_reading("trinity", f"2026-11-{day:02d}", menu=menu,
+            r = tarot_engine.do_reading("today", f"2026-11-{day:02d}", menu=menu,
                                         at=f"2026-11-{day:02d} 12:30", profile=None,
                                         combo_first=combo_first)
             for c in r["cards"]:
@@ -559,7 +544,7 @@ def test_combo_first_mostly_combo_when_menu_rich():
     ]
     hit = total = 0
     for day in range(1, 26):
-        r = tarot_engine.do_reading("trinity", f"2026-12-{day:02d}", menu=menu,
+        r = tarot_engine.do_reading("today", f"2026-12-{day:02d}", menu=menu,
                                     at=f"2026-12-{day:02d} 12:30", profile=None)
         for c in r["cards"]:
             total += 1
@@ -658,20 +643,6 @@ def test_reading_shows_combo_contents_under_name():
     assert hit, "这份菜单下应该至少抽到一次套餐"
 
 
-def test_week_reading_lists_combo_contents():
-    """本周餐单也要交代套餐里装了什么。"""
-    menu = [
-        {"name": "巨无霸", "code": "1", "price": 26.0, "category": "汉堡", "form": "single"},
-        {"name": "巨无霸三件套", "code": "2", "price": 37.0, "original_price": 50.5,
-         "category": "汉堡", "form": "combo"},
-        {"name": "薯条(中)", "code": "3", "price": 12.0, "category": "小食", "form": "single"},
-        {"name": "可乐(中)", "code": "4", "price": 10.0, "category": "饮品", "form": "single"},
-    ]
-    r = tarot_engine.do_week_reading("2026-12-07", menu=menu, profile=None)
-    assert "这周套餐里都装了什么" in r["markdown"]
-    assert any(d.get("combo_detail") for d in r["days"]), r["days"]
-
-
 def test_card_face_prints_combo_contents():
     """牌面小票上要印出套餐内容（不只是名字）。"""
     import tarot_card
@@ -763,10 +734,10 @@ def test_lean_vs_full_both_work():
     assert "🍱 形态" in r["markdown"]
 
 
-def test_render_writes_single_file_for_multi_card():
-    """多牌阵也只生成一张图（横向拼合），不再吐 N 个文件。"""
+def test_render_writes_single_file():
+    """单张预测只生成一张牌面图。"""
     import tarot_card
-    r = tarot_engine.do_reading("trinity", "2026-10-16", token=None, profile=False)
+    r = tarot_engine.do_reading("today", "2026-10-16", token=None, profile=False)
     with tempfile.TemporaryDirectory() as td:
         p = tarot_card.render(r, os.path.join(td, "card.svg"))
         assert p.endswith("card.svg") and os.path.exists(p)
@@ -775,20 +746,12 @@ def test_render_writes_single_file_for_multi_card():
         assert s.count("</svg>") == 1  # 一张画布
 
 
-def test_render_inline_scales_sheet_to_680():
-    """内联版：固定 680 宽，多张牌拼在同一张画布上等比缩放。"""
+def test_render_inline_is_680_wide():
+    """内联版：固定 680 宽的单张牌面 SVG。"""
     import tarot_card
     single = tarot_engine.do_reading("today", "2026-10-16", token=None, profile=False)
     s = tarot_card.render_inline(single)
     assert s.startswith("<svg") and 'viewBox="0 0 680 ' in s
-    triple = tarot_engine.do_reading("trinity", "2026-10-16", token=None, profile=False)
-    s3 = tarot_card.render_inline(triple)
-    assert 'viewBox="0 0 680 ' in s3
-    # 三张拼合后高度比单张矮（等比缩放，每张约 226 宽）
-    import re as _re
-    h1 = float(_re.search(r'viewBox="0 0 680 ([\d.]+)"', s).group(1))
-    h3 = float(_re.search(r'viewBox="0 0 680 ([\d.]+)"', s3).group(1))
-    assert h3 < h1
 
 
 if __name__ == "__main__":

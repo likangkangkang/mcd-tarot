@@ -6,8 +6,6 @@
 
 <img src="assets/sample-card.jpg" width="340" alt="麦麦塔罗牌示例牌面：隐者 → 咖啡双人套餐">
 
-<img src="assets/sample-trinity.jpg" width="820" alt="身心灵三餐：权杖七 / 宝剑九（逆位）/ 隐者">
-
 > 牌面由 `scripts/tarot_art.py` + `scripts/tarot_card.py` 纯代码绘制：深靛夜空、旧金双线框、拱形画窗、罗马数字、月相与星点。主画面把一份汉堡画成**披着生菜披风、头顶光环、张臂托着法器**的圣像；大阿卡纳各有自己的法器与天空（愚者的太阳、正义的天平与餐刀、世界的花环），小阿卡纳则把薯条/可乐/餐刀/汉堡币按张数串成一道半圆光环。逆位时圣像整体倒置。**不再把商品照贴进画框**，需要时用 `--photo` 在底部小票旁加一枚圆形餐品章。
 
 ---
@@ -23,22 +21,20 @@
 - **跟着饭点走** —— 按当前时间判定早餐/午餐/下午茶/晚餐/夜宵，同一张牌在早上和深夜给的建议不一样。
 - **多给套餐，还会叠券** —— 默认套餐优先：套餐吃得更完整，也更容易吃到「划线价立减 + 满减券」这层叠加。只有当菜单里真有对应套餐、且这份套餐值得时才会升级，夜宵碰到清简牌意又没有优惠就保持轻盈，不硬塞。
 - **套餐不藏内容** —— 抽到套餐时，名字下方直接写明里面每样餐品和数量（「麦辣鸡腿汉堡 ×1 ｜ 薯条(中) ×1 ｜ 可乐(中) ×1」），牌面小票上也会印出来；优先用官方明细，没有就按件数结合本店真实单品名推断，并标注「参考配置」。
-- **图在前、文在后** —— 牌面直接呈现在对话框里（不靠附件卡片），多牌阵也只在一张画布上横排拼合，**一次只出一张图**；文字部分不再重复图里已有的餐品/明细/价格，只留一段细腻的感官解读和「就它」这个下一步。
+- **图在前、文在后** —— 牌面直接呈现在对话框里（不靠附件卡片），每次抽牌只出**一张**牌面图；文字部分不再重复图里已有的餐品/明细/价格，只留一段细腻的感官解读和「就它」这个下一步。
 - **解读有体温** —— 78 张牌每张都配了感官短句（热汽扑脸、冰块撞杯壁、芝士拉丝…）和正/逆位各一句低语，写的是「你今天怎样」，不是干巴巴的关键词。
 - **顺势省一点** —— 只说「这道刚好能用哪张券、省多少」，不为了用券改推荐，也不做凑单比价。
 - **快** —— 抽牌本身 5 毫秒；`scripts/quick.py` 走全本地缓存，不联网、不下图、不开浏览器，通常百毫秒内出结果（实测含出图 30ms）。
 - **永远可演示** —— 没配 Token 也能跑（自动回退示例菜单），体验不打折。
 
-## 玩法
+## 玩法（全部是「一张图预测」）
 
 | 玩法 | 适合 | 张数 |
 |---|---|---|
-| `today` 今日宜吃 | 一句话决定今天吃啥 | 1 |
-| `choice` 三选一 | 选择困难，想三个选项 | 3 |
-| `trinity` 身·心·灵三餐 | 想被全方位关照 | 3 |
-| `timeline` 过去·现在·未来 | 想看清一段状态 | 3 |
-| `--week` 本周餐单 | 一次安排一周七顿 | 7 |
+| `today` 今日宜吃 | 一句话决定今天吃啥（按日期确定性抽签） | 1 |
+| `--question "你关心的问题"` 塔罗预测 | 抛出一个问题，牌作为回答 | 1 |
 
+每次抽牌都只出**一张牌、一张图**。同一问题同日结果稳定，不同问题会抽到不同牌。
 正逆位都会给：逆位不做恐吓，落点永远是「允许、休息、被看见」。
 
 ## 快速开始
@@ -49,23 +45,22 @@
 2. 在【连接器】启用 `mcd-mcp`（配置模板见 `assets/mcp-config.example.json`）。
 3. 直接说：
    - 「用麦麦塔罗牌帮我抽今天的」→ 今日宜吃 + 牌面图
-   - 「我今天有点累，抽个身心灵的」→ 三张解读
-   - 「抽个过去现在未来」→ 时间线
+   - 「帮我抽一张：明天面试能顺利吗」→ 牌作为这个问题的回答 + 牌面图
 
 **命令行 / 脚本**（纯标准库，无需第三方依赖）
 
 ```bash
-python3 scripts/tarot_engine.py --spread today --mood "加班到很晚，有点丧"
-python3 scripts/tarot_engine.py --spread choice --mood "选择困难"
-python3 scripts/tarot_engine.py --spread today --card-svg card.svg        # 出牌面（多牌阵拼成一张）
-python3 scripts/tarot_engine.py --spread today --lean                     # 精简文字（清单/价格交给牌面图）
-python3 scripts/tarot_engine.py --spread today --inline -                 # 牌面 SVG 打 stdout（内联对话框用）
-python3 scripts/tarot_engine.py --spread today --at "2026-10-20 12:30"    # 模拟午餐时段
-python3 scripts/tarot_engine.py --spread today --single-only              # 关掉套餐优先
-python3 scripts/tarot_engine.py --week                                    # 本周餐单
+python3 scripts/tarot_engine.py --mood "加班到很晚，有点丧"
+python3 scripts/tarot_engine.py --question "明天面试能顺利吗"
+python3 scripts/tarot_engine.py --card-svg card.svg                      # 出一张牌面
+python3 scripts/tarot_engine.py --lean                                   # 精简文字（清单/价格交给牌面图）
+python3 scripts/tarot_engine.py --inline -                              # 牌面 SVG 打 stdout（内联对话框用）
+python3 scripts/tarot_engine.py --at "2026-10-20 12:30"                 # 模拟午餐时段
+python3 scripts/tarot_engine.py --single-only                           # 关掉套餐优先
 
 # 最快的一条路：读本地缓存直接出牌，不联网不下图（缓存缺失时先跑一次连接器）
 python3 scripts/quick.py --mood "想被哄一下" --svg card.svg --timing
+python3 scripts/quick.py --question "今天会发财吗" --inline --lean      # 按问题抽一张预测
 
 # 想接真实菜单（需要 Token）：
 export MCD_MCP_TOKEN=你的Token
@@ -109,10 +104,10 @@ mcd-tarot/
 ├── SKILL.md                    # 技能定义与工作流（连接器优先 + 缓存优先 + 下单红线）
 ├── scripts/
 │   ├── tarot_deck.py           # 78 张牌 + 麦当劳映射 + 情绪寄语 + 份量倾向 + 品类
-│   ├── tarot_engine.py         # 抽签、牌阵、时段/形态/套餐升级、本周餐单、卡片入口
+│   ├── tarot_engine.py         # 抽签（今日宜吃 / 按问题预测）、时段/形态/套餐升级、卡片入口
 │   ├── tarot_art.py            # 牌面图形元件：汉堡圣像、法器、星月、四色花色
 │   ├── tarot_sense.py          # 细腻文案层：每张牌的感官短句 + 正/逆位低语
-│   ├── tarot_card.py           # 牌面排版：夜空 + 拱窗 + 罗马数字 + 小票（SVG/PNG，多牌阵拼成一张，--inline 内联对话框）
+│   ├── tarot_card.py           # 牌面排版：夜空 + 拱窗 + 罗马数字 + 小票（SVG/PNG，单张牌面，--inline 内联对话框）
 │   ├── mcp_client.py           # 标准库 mcd-mcp 客户端 + 口味/券/套餐匹配打分
 │   ├── profile.py              # 口味画像：历史订单 → 常点/口味/时段；券包 → 优惠索引
 │   ├── menu_from_connector.py  # query-meals → 引擎菜单（保留图片/划线价/套餐标记）
@@ -121,7 +116,7 @@ mcd-tarot/
 │   ├── quick.py                # 零网络快速抽牌（全本地缓存，30ms 级）
 │   ├── selfcheck.py            # 换季自检：价格覆盖 / 误映射 / 重复牌
 │   ├── order.py                # 下单确认卡 + 订单记录（不代付）
-│   └── tests/                  # 单元测试（54 项）
+│   └── tests/                  # 单元测试（52 项）
 ├── references/                 # 安装维护 / MCP 集成 / 示例解读 / 参赛声明
 ├── assets/                     # 连接器配置模板、requirements、示例牌面
 └── 运行时数据在 ~/.cache/mcd-tarot/（门店、当日菜单、口味画像、订单，不入库）
@@ -130,13 +125,13 @@ mcd-tarot/
 ## 自检与维护
 
 ```bash
-python3 scripts/tests/test_tarot_engine.py   # 54 项单测
+python3 scripts/tests/test_tarot_engine.py   # 52 项单测
 python3 scripts/selfcheck.py                 # 换季自检，非零退出说明要修关键词
 python3 scripts/cache.py clear --all         # 缓存坏了就重建
 python3 scripts/profile.py clear             # 用户说「别记我」
 ```
 
-当前状态：78/78 张牌有价、关键词命中 78/78、365 天 × 3 牌阵零重复牌；菜单里各品类都有套餐时，套餐占比可达 98%，平均每单省约 ¥9。
+当前状态：78/78 张牌有价、关键词命中 78/78、365 天单张抽签零重复牌；菜单里各品类都有套餐时，套餐占比可达 98%，平均每单省约 ¥9。
 
 ## 安全与合规
 

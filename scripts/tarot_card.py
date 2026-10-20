@@ -14,8 +14,7 @@
 
 用法
 ----
-    python3 scripts/tarot_engine.py --spread today --card-svg card.svg
-    python3 scripts/tarot_engine.py --spread trinity --card-svg cards.svg   # 会生成 3 张
+    python3 scripts/tarot_engine.py --card-svg card.svg
     python3 scripts/tarot_card.py reading.json card.svg --photo
     python3 scripts/tarot_card.py reading.json card.png --png              # 需要 Chrome
 """
@@ -61,7 +60,7 @@ ART_CX = ART_X + ART_W / 2
 # 小票
 TICKET_Y = 1028
 
-# 多牌阵排成一张时的牌间空隙
+# 牌面横向留白（保留给多张牌拼合场景；单张时不生效）
 SHEET_GAP = 28
 # 内联到对话框时的画布宽度（图片直接呈现在对话里，不靠附件卡片）
 INLINE_W = 680
@@ -457,7 +456,7 @@ def render_inline(reading: Dict, photo: bool = False) -> str:
 def render_png(reading: Dict, out_png: str, photo: bool = False, width: int = 750) -> str:
     """用本机 Chrome 无头模式把牌面渲染成 PNG（可选，慢约 1–2 秒）。
 
-    多牌阵同样只出一**张** PNG（横排拼合）。width 指整张图的宽度。
+    渲染整张牌面 PNG（单张）。width 指整张图的宽度。
     没装 Chrome 时抛 RuntimeError，调用方可以只用 SVG。
     """
     import shutil

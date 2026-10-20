@@ -21,6 +21,6 @@
 
 ## 4. 验证方式
 - `python3 scripts/tarot_deck.py`：确认 78 张牌组构建正确。
-- `python3 scripts/tarot_engine.py --spread today|choice|trinity|timeline`：各牌阵均产出完整情绪化解读。
-- 同日复现性、各牌阵独立性已通过断言验证（见 `tests/`）。
+- `python3 scripts/tarot_engine.py` / `--question "你关心的问题"`：单张预测均产出完整情绪化解读。
+- 同日复现性、按问题抽不同牌（同问题稳定）已通过断言验证（见 `tests/`）。
 - 无 Token 时自动回退示例菜单，演示零门槛。
