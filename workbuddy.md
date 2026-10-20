@@ -10,7 +10,7 @@
 ## 2. 开发过程（对话式）
 1. 用户提出创意：「把麦当劳餐盘与塔罗牌结合，解读今天该吃什么，给足情绪价值」。
 2. 在 WorkBuddy 中确认命名 **麦麦塔罗牌**，并约定「明天检查」。
-3. 与助手一起搭建：78 张牌组（`tarot_deck.py`）→ 占卜引擎（`tarot_engine.py`，按日期确定性抽签）→ 仅标准库的 mcd-mcp 客户端（`mcp_client.py`，真实菜单优先、回退示例）→ `SKILL.md` 与文档。
+3. 与助手一起搭建：78 张牌组（`tarot_deck.py`）→ 塔罗引擎（`tarot_engine.py`，按日期确定性抽签）→ 仅标准库的 mcd-mcp 客户端（`mcp_client.py`，真实菜单优先、回退示例）→ `SKILL.md` 与文档。
 4. 全程使用 WorkBuddy 的代码编写、Python 运行验证、文件管理完成。
 
 ## 3. 与 WorkBuddy 的契合点（评审要点）

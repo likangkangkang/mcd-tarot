@@ -1,4 +1,4 @@
-"""麦麦塔罗牌 · 占卜引擎。
+"""麦麦塔罗牌 · 塔罗引擎。
 
 把 78 张塔罗牌与麦当劳餐盘连接：按「日期」做确定性抽签（同一天结果稳定），
 支持多种牌阵与正/逆位，把每张牌映射到真实麦当劳单品，并产出温暖的情绪化解读。
@@ -160,7 +160,7 @@ def _menu_source_label(token: Optional[str], menu) -> str:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="麦麦塔罗牌占卜引擎")
+    ap = argparse.ArgumentParser(description="麦麦塔罗牌塔罗引擎")
     ap.add_argument("--spread", choices=list(SPREADS), default="today", help="牌阵")
     ap.add_argument("--mood", default=None, help="今天的心情（可选，用于个性化开场）")
     ap.add_argument("--date", default=None, help="指定日期 YYYY-MM-DD（默认今天）")
