@@ -59,7 +59,7 @@ PERIODS = [
     (10 * 60 + 30, 13 * 60 + 59, "lunch", "午餐",
      "午市套餐普遍比单点省十块以上，适合一次吃完整"),
     (14 * 60, 16 * 60 + 59, "afternoon", "下午茶",
-     "小食配饮品就够，别让血糖坐过山车"),
+     "容易犯困的时段，想吃就吃，配杯喝的慢慢回血"),
     (17 * 60, 20 * 60 + 59, "dinner", "晚餐",
      "晚餐适合把套餐吃完整，犒劳跑了一天的自己"),
     (21 * 60, 23 * 60 + 59, "night", "夜宵",
@@ -113,28 +113,52 @@ def tuned_portion(card: Dict, period: Optional[Dict[str, str]],
     return {"light": "light", "single": "single", "combo": "single", "share": "combo"}[base]
 
 
+_FORM_CN = {"combo": "套餐", "single": "单品", "share": "分享装", "light": "轻食"}
+
+
 def _portion_note(card: Dict, item: Dict, period: Optional[Dict[str, str]],
                   profile: Optional[Dict] = None) -> str:
-    """一句话解释「为什么给你配了这个形态」。"""
+    """一句话解释「为什么给你配了这个形态」。
+
+    关键：形态和牌面不一致时（牌面偏套餐、实际给单品），不能再说「牌面偏套餐」，
+    否则一行里前后自相矛盾；此时要把「为什么调」说清楚。
+    """
     base = tarot_deck.portion_of(card)
     label = tarot_deck.PORTION_LABEL.get(base, "单品")
     form = item.get("form") or ("combo" if "套餐" in str(item.get("name")) else "single")
+    form_cn = _FORM_CN.get(form, "单品")
     pname = period["name"] if period else ""
-    learned = (((profile or {}).get("periods") or {}).get((period or {}).get("key")) or {}).get("top_form")
-    if learned and form in ("combo", "single") and form == learned:
-        habit = "组合/套餐" if learned == "combo" else "单品"
-        return f"牌面偏「{label}」，你{pname}一向点{habit}，这样最顺手"
-    if form == "combo":
-        if period and period["key"] in ("lunch", "dinner"):
-            return f"牌面偏「{label}」，{pname}配套餐更划算"
-        return f"牌面偏「{label}」，这份套餐配得齐、不用再凑"
-    if form == "share":
-        return f"牌面偏「{label}」，这份适合分着吃"
-    if period and period["key"] in ("afternoon", "night"):
-        return f"牌面偏「{label}」，{pname}不必吃太满，单品刚好"
-    if period and period["key"] == "breakfast":
-        return f"牌面偏「{label}」，早上吃轻一点，一整天都舒服"
-    return f"牌面偏「{label}」，单品就是今天的分寸"
+    key = (period or {}).get("key")
+    learned = (((profile or {}).get("periods") or {}).get(key) or {}).get("top_form")
+
+    heavy_base = base in ("combo", "share")
+    heavy_form = form in ("combo", "share")
+
+    if heavy_base == heavy_form:
+        # 形态与牌面一致：解释牌面本身
+        if heavy_form:
+            if learned == "combo":
+                return f"牌面偏「{label}」，你{pname}一向点套餐，这样最顺手"
+            if key in ("lunch", "dinner"):
+                return f"牌面偏「{label}」，{pname}配套餐更划算"
+            return f"牌面偏「{label}」，这份套餐配得齐、不用再凑"
+        if learned == "single":
+            return f"牌面偏「{label}」，你{pname}一向点单品，这样最顺手"
+        if key in ("afternoon", "night"):
+            return f"牌面偏「{label}」，{pname}点单品刚好"
+        if key == "breakfast":
+            return f"牌面偏「{label}」，早上吃轻一点，一整天都舒服"
+        return f"牌面偏「{label}」，单品就是今天的分寸"
+
+    # 形态与牌面不一致：说清是按什么调的
+    if learned in ("combo", "single") and form == learned:
+        habit = "套餐" if learned == "combo" else "单品"
+        return f"牌面偏「{label}」，但你在{pname}习惯点{habit}，就按你的惯性来"
+    if key in ("afternoon", "night"):
+        return f"牌面偏「{label}」，{pname}换成{form_cn}更合节奏"
+    if key in ("lunch", "dinner"):
+        return f"牌面偏「{label}」，{pname}吃{form_cn}更对路"
+    return f"牌面偏「{label}」，今天用{form_cn}接着"
 
 
 def daily_seed(date_str: str) -> int:

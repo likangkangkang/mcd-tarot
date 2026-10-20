@@ -613,13 +613,20 @@ def _resolve_core(
 
     # 连品类都对不上（菜单没带分类）：按牌号在菜单里轮转，优先满足推荐形态
     if candidates:
-        tier = [it for it in candidates if prefer_form and _form(it) == prefer_form]
+        # 注意：菜单里的 form 只有 combo/single/goods，没有 light，
+        # 直接用 prefer_form 精确比对会让「轻食」偏好永远落空 → 走放宽表
+        allowed = set(_FORM_FALLBACK.get(prefer_form, (prefer_form,))) if prefer_form else set()
+        tier = [it for it in candidates if _form(it) in allowed]
         rest = [it for it in candidates if it not in tier]
-        ordered = (tier + [it for it in rest if not BUNDLE_PATTERN.search(str(it["name"]))]
-                   + [it for it in rest if BUNDLE_PATTERN.search(str(it["name"]))])
-        start = int(card.get("id") or 0) % len(ordered)
-        for i in range(len(ordered)):
-            it = ordered[(start + i) % len(ordered)]
+        # 轮换只在「符合形态偏好」那一层里做，否则起点会跳到后面的套餐上
+        if tier:
+            start = int(card.get("id") or 0) % len(tier)
+            ordered = tier[start:] + tier[:start]
+        else:
+            ordered = []
+        ordered += [it for it in rest if not BUNDLE_PATTERN.search(str(it["name"]))]
+        ordered += [it for it in rest if BUNDLE_PATTERN.search(str(it["name"]))]
+        for it in ordered:
             if str(it["name"]) not in exclude and it.get("price") is not None:
                 return _tag(it, "menu-fallback")
         pick = _cheapest([it for it in candidates if str(it["name"]) not in exclude])

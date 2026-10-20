@@ -5,6 +5,7 @@
 import os
 import sys
 import traceback
+from datetime import datetime
 
 # 让 tests/ 能 import 到项目根目录的模块
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -397,6 +398,34 @@ def test_reading_without_profile_still_works():
                                 at="2026-10-20 12:30", profile=False)
     assert r["cards"], r
     assert r["profile_used"] is False
+
+
+def test_portion_note_never_contradicts_form():
+    """形态文案不能自相矛盾：牌面偏套餐却给单品时，必须解释「为什么调」。"""
+    period = tarot_engine.period_of(datetime(2026, 10, 20, 15, 30))  # 下午茶
+    for card in tarot_deck.ALL_CARDS:
+        base = tarot_deck.portion_of(card)
+        label = tarot_deck.PORTION_LABEL.get(base, "单品")
+        for form in ("single", "combo", "share", "light"):
+            item = {"name": "测试餐品", "form": form}
+            note = tarot_engine._portion_note(card, item, period, None)
+            heavy_base = base in ("combo", "share")
+            heavy_form = form in ("combo", "share")
+            if heavy_base == heavy_form:
+                assert note.startswith(f"牌面偏「{label}」"), (base, form, note)
+            else:
+                # 不一致时不能说「单品刚好」这类结论，要交代调整原因
+                assert any(k in note for k in ("换成", "习惯点", "更对路", "接着")), (base, form, note)
+
+
+def test_light_preference_avoids_combo_in_fallback():
+    """「轻食」偏好落到兜底路径时也不能塞套餐（菜单 form 里没有 light）。"""
+    card = {"id": 7, "mcd_keywords": ["不存在的菜"], "mcd_category": "查无此类"}
+    menu = [{"name": "某三件套", "code": "1", "price": 35.0, "form": "combo", "category": ""},
+            {"name": "某单品", "code": "2", "price": 20.0, "form": "single", "category": ""}]
+    for _ in range(6):
+        item = mcp_client.resolve_item(card, menu, exclude=set(), prefer_form="light")
+        assert item["form"] == "single", item
 
 
 if __name__ == "__main__":
