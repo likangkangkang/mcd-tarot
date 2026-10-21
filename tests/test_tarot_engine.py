@@ -1,6 +1,6 @@
 """麦麦塔罗牌 · 单元测试（纯标准库，无第三方依赖）。
 
-运行: python3 scripts/tests/test_tarot_engine.py
+运行: python3 tests/test_tarot_engine.py
 """
 import os
 import sys
@@ -8,8 +8,8 @@ import tempfile
 import traceback
 from datetime import datetime
 
-# 让 tests/ 能 import 到项目根目录的模块
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# 让 tests/ 能 import 到 scripts/ 下的模块
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts"))
 
 import tarot_deck
 import tarot_engine

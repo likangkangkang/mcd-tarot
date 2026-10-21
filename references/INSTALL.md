@@ -12,8 +12,9 @@ mcd-tarot/
 ├── scripts/            # 牌组 / 引擎 / 画像 / 缓存 / 自检 / 塔罗牌面 / 下单辅助 / 菜单归一化 / 测试
 │   ├── tarot_deck.py       tarot_engine.py    mcp_client.py     profile.py
 │   ├── menu_from_connector.py   cache.py      selfcheck.py    quick.py         order.py
-│   ├── tarot_art.py   tarot_card.py   # 牌面图形元件 + 排版
-│   └── tests/test_tarot_engine.py
+│   └── tarot_art.py   tarot_card.py   # 牌面图形元件 + 排版
+├── tests/              # 单元测试
+│   └── test_tarot_engine.py
 ├── references/         # README、MCP 集成说明、示例解读、本文件
 ├── assets/             # 配置模板：mcp-config.example.json、.env.example、requirements.txt
 └── (运行时缓存不在本目录：~/.cache/mcd-tarot/)
@@ -23,7 +24,7 @@ mcd-tarot/
 ```bash
 cd ~/.workbuddy/skills/mcd-tarot
 git pull            # 从仓库取最新
-python3 scripts/tests/test_tarot_engine.py
+python3 tests/test_tarot_engine.py
 python3 scripts/selfcheck.py     # 换季后建议跑
 ```
 改完想发版：
@@ -41,7 +42,7 @@ git add -A && git commit -m "..." && git push
 ## 自检
 ```bash
 cd ~/.workbuddy/skills/mcd-tarot
-python3 scripts/tests/test_tarot_engine.py     # 52 项单元测试
+python3 tests/test_tarot_engine.py     # 52 项单元测试
 python3 scripts/selfcheck.py                   # 价格覆盖 / 误映射 / 重复牌
 python3 scripts/profile.py show                # 看画像学到了什么
 python3 scripts/tarot_engine.py --question "今天值得吃顿好的吗"  # 按问题抽一张预测
