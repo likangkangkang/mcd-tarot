@@ -15,9 +15,8 @@
 
 ### 方式一：上传技能包（推荐，云端版也能用）
 
-1. 拿技能包 `mcd-tarot-skill.zip`：仓库 **Releases** 页有就直接下载；
-   没有的话点右上角 **Code → Download ZIP** 拿到源码包后，本地跑一次 `python3 scripts/pack.py`
-   生成规范技能包（或按方式二 clone 后打包）。
+1. 下载技能包：[`mcd-tarot-skill.zip`](https://github.com/likangkangkang/mcd-tarot/releases/download/v1.0.0/mcd-tarot-skill.zip)
+   （Release `v1.0.0` 附件，179 KB）。
 2. 打开 WorkBuddy 左侧【专家 · 技能 · 连接器】→ **技能** → **添加技能** → **上传技能**，
    选中这个 zip，系统自动完成配置，不用再操作别的。
 3. 启用【连接器】`mcd-mcp`（模板见 `assets/mcp-config.example.json`），然后对它说「**今日运势**」。
